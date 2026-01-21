@@ -203,6 +203,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "anchor-rock-paper-scissor"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "ephemeral-rollups-sdk",
+]
+
+[[package]]
 name = "anchor-syn"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
