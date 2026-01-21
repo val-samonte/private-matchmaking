@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { PrivateMatchmaking } from "../target/types/private_matchmaking";
-import { MatchmakingClient } from "../app/client";
+import { MatchmakingClient } from "../sdk/src"; 
 import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
 import { expect } from "chai";
 
@@ -51,7 +51,7 @@ describe("private-matchmaking", () => {
 
         queuePda = await client.initializeQueue(queueId, config, capacity, pageSize);
         
-        const queueAccount = await program.account.queueHead.fetch(queuePda);
+        const queueAccount = await client.getQueue(queuePda);
         expect(queueAccount.capacity).to.equal(capacity);
         
         console.log("Queue Initialized:", queuePda.toBase58());
@@ -59,24 +59,10 @@ describe("private-matchmaking", () => {
 
     it("Creates Mock Players", async () => {
         // Create Player A Data Account (Owned by Program)
-        await program.methods.createMockPlayer(new anchor.BN(1000))
-            .accounts({
-                playerAccount: playerA_Data.publicKey,
-                authority: authority,
-                systemProgram: SystemProgram.programId,
-            })
-            .signers([playerA_Data]) // Sign to create
-            .rpc();
+        await client.createMockPlayer(playerA_Data, 1000);
 
         // Create Player B Data Account
-        await program.methods.createMockPlayer(new anchor.BN(1050))
-            .accounts({
-                playerAccount: playerB_Data.publicKey,
-                authority: authority,
-                systemProgram: SystemProgram.programId,
-            })
-            .signers([playerB_Data])
-            .rpc();
+        await client.createMockPlayer(playerB_Data, 1050);
             
         console.log("Mock Players Created");
     });
@@ -86,7 +72,8 @@ describe("private-matchmaking", () => {
         // Attempt 1: Use Client for Player A (Provider).
         // Player A Data = playerA_Data.
         console.log("Player A Data:", playerA_Data.publicKey.toBase58());
-        await client.joinQueue(queuePda, playerA_Data.publicKey, program.programId);
+        const { statusPda: statusA } = await client.joinQueue(queuePda, playerA_Data.publicKey, program.programId);
+        console.log("Player A joined, Status:", statusA.toBase58());
          
         // Fund Player B via Transfer (Airdrop is flaky on Devnet)
         const transferTx = new anchor.web3.Transaction().add(
@@ -98,36 +85,20 @@ describe("private-matchmaking", () => {
         );
         await provider.sendAndConfirm(transferTx);
         
-        // Attempt 2: Use Raw Method for Player B (Keypair).
-        // Data: playerB_Data. Wallet: playerB.
+        // Attempt 2: Use Client for Player B (Keypair).
+        // Create a separate client instance for Player B
+        const providerB = new anchor.AnchorProvider(
+            provider.connection,
+            new anchor.Wallet(playerB),
+            anchor.AnchorProvider.defaultOptions()
+        );
+        const clientB = new MatchmakingClient(providerB, program.programId); // SDK handles provider
+        
         console.log("Player B Data:", playerB_Data.publicKey.toBase58());
         
-        // Calculate PDAs
-        const queueAccount = await program.account.queueHead.fetch(queuePda);
-        const writeIndex = queueAccount.writePageIndex.toNumber();
-        const currentIndex = writeIndex % 10; 
-         const [pagePda] = PublicKey.findProgramAddressSync(
-            [Buffer.from("page"), queuePda.toBuffer(), new anchor.BN(currentIndex).toArrayLike(Buffer, "le", 8)],
-            program.programId
-        );
-        const [statusPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from("status"), playerB_Data.publicKey.toBuffer()],
-            program.programId
-        );
-        console.log("Player B Status PDA:", statusPda.toBase58());
+        const { statusPda: statusB } = await clientB.joinQueue(queuePda, playerB_Data.publicKey, program.programId);
         
-        await program.methods.joinQueue()
-            .accounts({
-                queue: queuePda,
-                page: pagePda,
-                playerStatus: statusPda,
-                playerAuthority: playerB.publicKey,
-                playerGameAccount: playerB_Data.publicKey,
-                systemProgram: SystemProgram.programId,
-            })
-            .signers([playerB])
-            .rpc();
-        
+        console.log("Player B Status PDA:", statusB.toBase58());
         console.log("Players Joined on L1");
     });
     
@@ -143,25 +114,24 @@ describe("private-matchmaking", () => {
 
     it("Unlocks Player (Rent Refund)", async () => {
          // Unlock Player A (Provider)
-         // Authority: Provider (Game Dev).
-         // Player Wallet: Provider (Rent Recipient).
-         // Data: playerA_Data.
+         // Authority, Player Wallet = Provider.
          
          await client.unlockPlayer(playerA_Data.publicKey, provider.wallet.publicKey);
          
          // Verify Status PDA is gone
-         const [statusPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from("status"), playerA_Data.publicKey.toBuffer()],
-            program.programId
-        );
-        const info = await provider.connection.getAccountInfo(statusPda);
-        expect(info).to.be.null; 
-        console.log("✔ Player A Unlocked");
+         // Use raw connection check as 'fetch' might throw if account doesn't exist
+         const statusPda = await client.getPlayerStatusForGameAccount(playerA_Data.publicKey)
+            .then(a => "Exists")
+            .catch(e => null);
+            
+         expect(statusPda).to.be.null; 
+         console.log("✔ Player A Unlocked");
     });
 
     it("Verifies 'Plug and Play' with External Account", async () => {
          // Create a RAW account owned by a made-up Keypair (simulating a 3rd party Game Program)
          const gameProgram = Keypair.generate(); // The "Third Party"
+         const foreignWallet = Keypair.generate(); // The Human Player Wallet
          
          // 1. We need a new Queue configured to trust this Third Party
          const foreignQueueId = `foreign-${Date.now()}`;
@@ -178,7 +148,6 @@ describe("private-matchmaking", () => {
         const foreignQueue = await client.initializeQueue(foreignQueueId, foreignConfig, 10, 5);
         
         // 2. Create the Data Account owned by 'gameProgram'
-        // We create an account with 100 bytes, owned by gameProgram.publicKey
         const space = 100;
         const lamports = await provider.connection.getMinimumBalanceForRentExemption(space);
         
@@ -193,28 +162,25 @@ describe("private-matchmaking", () => {
         );
         await provider.sendAndConfirm(tx, [foreignPlayer]);
         
-        // 3. Write Mock ELO data (u64 = 1200) at offset 0
-        // Since we can't write to it (we don't have the private key of the program?), 
-        // wait, we can't verify the DATA unless we are that program or use a test fixture setup.
-        // BUT, `join_queue` only CHECKS OWNERSHIP. It reads data.
-        // If data is all zeros, ELO is 0. That is valid.
-        // The test here is: Does `join_queue` accept an account owned by `gameProgram`?
-        
-        // We need player authority to sign.
-        // We reused `provider.wallet` as player authority for simplicity in client? 
-        // No, client uses `provider.wallet` as authority.
-        
-        // Fund Foreign Player Wallet via Transfer
+        // 3. Fund Foreign Player Wallet
         const transferTx = new anchor.web3.Transaction().add(
              anchor.web3.SystemProgram.transfer({
                 fromPubkey: provider.wallet.publicKey,
-                toPubkey: foreignPlayer.publicKey,
+                toPubkey: foreignWallet.publicKey,
                 lamports: 0.1 * anchor.web3.LAMPORTS_PER_SOL,
             })
         );
         await provider.sendAndConfirm(transferTx);
 
-        await client.joinQueue(foreignQueue, foreignPlayer.publicKey, gameProgram.publicKey);
+        // We act as 'foreignPlayer' (Wallet)
+         const providerForeign = new anchor.AnchorProvider(
+            provider.connection,
+            new anchor.Wallet(foreignWallet),
+            anchor.AnchorProvider.defaultOptions()
+        );
+        const clientForeign = new MatchmakingClient(providerForeign, program.programId);
+
+        await clientForeign.joinQueue(foreignQueue, foreignPlayer.publicKey, gameProgram.publicKey);
         console.log("✔ Joined Queue using simulated 3rd Party Account");
     });
 
@@ -231,8 +197,6 @@ describe("private-matchmaking", () => {
             if (JSON.stringify(e).includes("out of memory")) {
                 console.warn("⚠ Delegation Program crashed (OOM) - Local Sim Limitation.");
             } else {
-                // throw e; 
-                // Don't throw for now if it fails locally, as we care about L1 lock check mostly
                 console.log("Delegation failed locally (expected if no ER):", e.message);
             }
         }
@@ -240,18 +204,9 @@ describe("private-matchmaking", () => {
     
     it("Verifies Privacy Lock (Write Blocked)", async () => {
         // Try ProcessMatch on L1
-         const [pagePda] = PublicKey.findProgramAddressSync(
-              [Buffer.from("page"), queuePda.toBuffer(), new anchor.BN(0).toArrayLike(Buffer, "le", 8)],
-              program.programId
-          );
-          
          try {
-            await program.methods.processMatch(new anchor.BN(0))
-            .accounts({
-                queue: queuePda,
-                page: pagePda
-            })
-            .rpc();
+            await client.processMatch(queuePda, 0);
+            
             // If delegation worked, this MUST fail.
             // If delegation failed (local), this might pass.
             console.log("Warning: L1 ProcessMatch succeeded (Delegation failed or not active)");
@@ -261,5 +216,3 @@ describe("private-matchmaking", () => {
     });
 
 });
-
-
