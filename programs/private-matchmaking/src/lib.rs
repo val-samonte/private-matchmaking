@@ -204,6 +204,17 @@ pub mod private_matchmaking {
         account.elo = elo;
         Ok(())
     }
+
+    // 🧹 Cleanup / Reclamation Instructions
+    pub fn close_page(_ctx: Context<ClosePage>, _page_index: u64) -> Result<()> {
+        msg!("Page account closed. Rent reclaimed.");
+        Ok(())
+    }
+
+    pub fn close_queue(_ctx: Context<CloseQueue>, _queue_id: String) -> Result<()> {
+         msg!("Queue account closed. Rent reclaimed.");
+         Ok(())
+    }
 }
 
 // --- Helpers ---
@@ -403,4 +414,41 @@ pub struct MatchFound {
     pub elo_a: u64,
     pub elo_b: u64,
     pub timestamp: i64,
+}
+
+#[derive(Accounts)]
+#[instruction(page_index: u64)]
+pub struct ClosePage<'info> {
+    #[account(mut)]
+    pub queue: Account<'info, QueueHead>,
+    
+    #[account(
+        mut,
+        close = authority,
+        seeds = [
+            b"page", 
+            queue.key().as_ref(), 
+            &page_index.to_le_bytes()
+        ],
+        bump
+    )]
+    pub page: Account<'info, QueuePage>,
+    
+    #[account(mut)]
+    pub authority: Signer<'info>, 
+}
+
+#[derive(Accounts)]
+#[instruction(queue_id: String)]
+pub struct CloseQueue<'info> {
+    #[account(
+        mut,
+        close = authority,
+        seeds = [b"queue-head", authority.key().as_ref(), queue_id.as_bytes()],
+        bump
+    )]
+    pub queue: Account<'info, QueueHead>,
+    
+    #[account(mut)]
+    pub authority: Signer<'info>,
 }

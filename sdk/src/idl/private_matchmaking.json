@@ -8,6 +8,118 @@
   },
   "instructions": [
     {
+      "name": "close_page",
+      "discriminator": [
+        205,
+        141,
+        25,
+        179,
+        31,
+        1,
+        103,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "writable": true
+        },
+        {
+          "name": "page",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              },
+              {
+                "kind": "arg",
+                "path": "page_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "_page_index",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close_queue",
+      "discriminator": [
+        199,
+        20,
+        99,
+        205,
+        82,
+        40,
+        134,
+        109
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  45,
+                  104,
+                  101,
+                  97,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "arg",
+                "path": "queue_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "_queue_id",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "name": "create_mock_player",
       "discriminator": [
         168,

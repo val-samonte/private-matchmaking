@@ -14,6 +14,118 @@ export type PrivateMatchmaking = {
   },
   "instructions": [
     {
+      "name": "closePage",
+      "discriminator": [
+        205,
+        141,
+        25,
+        179,
+        31,
+        1,
+        103,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "writable": true
+        },
+        {
+          "name": "page",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              },
+              {
+                "kind": "arg",
+                "path": "pageIndex"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "pageIndex",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "closeQueue",
+      "discriminator": [
+        199,
+        20,
+        99,
+        205,
+        82,
+        40,
+        134,
+        109
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  45,
+                  104,
+                  101,
+                  97,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "arg",
+                "path": "queueId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "queueId",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "name": "createMockPlayer",
       "discriminator": [
         168,

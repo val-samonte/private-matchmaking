@@ -247,4 +247,37 @@ export class MatchmakingClient {
             .rpc(this.config.confirmOptions);
         return tx;
     }
+
+    /**
+     * Close a queue page to reclaim rent.
+     */
+    async closePage(queue: PublicKey, index: number): Promise<TransactionSignature> {
+        const pagePda = derivePagePda(this.program.programId, queue, index);
+        const tx = await this.program.methods
+            .closePage(new anchor.BN(index))
+            .accounts({
+                queue: queue,
+                page: pagePda,
+                authority: this.provider.wallet.publicKey,
+            })
+            .rpc(this.config.confirmOptions);
+        console.log(`Closed Page ${index}: ${pagePda.toBase58()}`);
+        return tx;
+    }
+
+    /**
+     * Close a queue head to reclaim rent.
+     */
+    async closeQueue(queueId: string): Promise<TransactionSignature> {
+        const queuePda = deriveQueuePda(this.program.programId, this.provider.wallet.publicKey, queueId);
+        const tx = await this.program.methods
+            .closeQueue(queueId)
+            .accounts({
+                queue: queuePda,
+                authority: this.provider.wallet.publicKey,
+            })
+            .rpc(this.config.confirmOptions);
+        console.log(`Closed Queue: ${queuePda.toBase58()}`);
+        return tx;
+    }
 }

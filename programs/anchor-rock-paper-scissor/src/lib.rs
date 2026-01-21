@@ -126,12 +126,38 @@ pub mod anchor_rock_paper_scissor {
             | (Choice::Paper, Choice::Rock)
             | (Choice::Scissors, Choice::Paper) => GameResult::Winner(player1),
 
-            (Choice::Rock, Choice::Paper)
-            | (Choice::Paper, Choice::Scissors)
-            | (Choice::Scissors, Choice::Rock) => GameResult::Winner(player2),
+            (Choice::Scissors, Choice::Rock) => GameResult::Winner(player2),
 
             _ => GameResult::Tie,
         };
+
+        // 5️⃣ Update ELO
+        let p1_profile = &mut ctx.accounts.player1_profile;
+        let p2_profile = &mut ctx.accounts.player2_profile;
+
+        match game.result {
+            GameResult::Winner(winner) => {
+                if winner == player1 {
+                    p1_profile.elo = p1_profile.elo.saturating_add(10);
+                    p1_profile.wins = p1_profile.wins.saturating_add(1);
+
+                    p2_profile.elo = p2_profile.elo.saturating_sub(10);
+                    p2_profile.losses = p2_profile.losses.saturating_add(1);
+                    msg!("Player 1 won! New ELO: P1={}, P2={}", p1_profile.elo, p2_profile.elo);
+                } else {
+                    p2_profile.elo = p2_profile.elo.saturating_add(10);
+                    p2_profile.wins = p2_profile.wins.saturating_add(1);
+
+                    p1_profile.elo = p1_profile.elo.saturating_sub(10);
+                    p1_profile.losses = p1_profile.losses.saturating_add(1);
+                    msg!("Player 2 won! New ELO: P1={}, P2={}", p1_profile.elo, p2_profile.elo);
+                }
+            }
+            GameResult::Tie => {
+                msg!("It's a tie! ELO unchanged.");
+            }
+            _ => {}
+        }
 
         UpdatePermissionCpiBuilder::new(&permission_program)
             .permissioned_account(&game.to_account_info(), true)
@@ -302,6 +328,14 @@ pub struct MakeChoice<'info> {
 pub struct RevealWinner<'info> {
     #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
+
+    /// Player1 Profile (for ELO update)
+    #[account(mut, seeds = [PLAYER_PROFILE_SEED, game.player1.unwrap().as_ref()], bump)]
+    pub player1_profile: Account<'info, PlayerProfile>,
+
+    /// Player2 Profile (for ELO update)
+    #[account(mut, seeds = [PLAYER_PROFILE_SEED, game.player2.unwrap().as_ref()], bump)]
+    pub player2_profile: Account<'info, PlayerProfile>,
 
     /// Player1's choice PDA (derived automatically)
     #[account(
