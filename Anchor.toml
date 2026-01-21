@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-private_matchmaking = "FTmhTEzrRrQp4U7ySjTLWry53VoKUCG4NqH12mcfzTSd"
+private_matchmaking = "GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"
 
 [registry]
 url = "https://api.apr.dev"

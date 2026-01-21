@@ -28,7 +28,7 @@ pub mod errors {
 
 use state::*;
 
-declare_id!("FTmhTEzrRrQp4U7ySjTLWry53VoKUCG4NqH12mcfzTSd"); 
+declare_id!("GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"); 
 
 #[ephemeral]
 #[program]
