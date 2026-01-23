@@ -6,8 +6,9 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@magicblock-labs/ephemeral-rollups-sdk": "0.8.0",
     "@solana/web3.js": "^1.95.3",
-    "@magicblock-labs/ephemeral-rollups-sdk": "0.8.0"
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@types/bn.js": "^5.1.0",

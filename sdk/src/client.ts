@@ -8,8 +8,9 @@ import {
     ComputeBudgetProgram
 } from "@solana/web3.js";
 import { PrivateMatchmaking } from "./idl/private_matchmaking";
-import { MatchmakingClientConfig, QueueHead, QueuePage, PlayerStatus } from "./types";
+import { MatchmakingClientConfig, QueueHead, QueuePage, PlayerStatus, JoinQueueResult } from "./types";
 import { derivePagePda, derivePlayerStatusPda, deriveQueuePda } from "./utils";
+import { EncryptionProvider } from "./encryption";
 
 // Default Validator for Devnet (MagicBlock)
 const DEFAULT_VALIDATOR = "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA";
@@ -18,6 +19,7 @@ export class MatchmakingClient {
     program: Program<PrivateMatchmaking>;
     provider: AnchorProvider;
     config: MatchmakingClientConfig;
+    encryption: EncryptionProvider;
 
     constructor(
         provider: AnchorProvider, 
@@ -26,6 +28,7 @@ export class MatchmakingClient {
     ) {
         this.provider = provider;
         this.config = config;
+        this.encryption = new EncryptionProvider();
         
         // Load the IDL (we assume it's bundled or we can require it if running in node)
         // For SDK purity, we should import the JSON.
@@ -119,7 +122,7 @@ export class MatchmakingClient {
         queue: PublicKey, 
         playerGameAccount: PublicKey, 
         tenantProgramId: PublicKey
-    ): Promise<{ tx: TransactionSignature, statusPda: PublicKey }> {
+    ): Promise<JoinQueueResult> {
         // Fetch queue to determine current WRITE index
         const queueAccount = await this.getQueue(queue);
         const capacity = queueAccount.capacity;
@@ -129,15 +132,31 @@ export class MatchmakingClient {
         const pagePda = derivePagePda(this.program.programId, queue, currentIndex);
         const statusPda = derivePlayerStatusPda(this.program.programId, playerGameAccount);
 
+        // Encryption Handshake Integration
+        let instructionData: Buffer | undefined;
+        if (this.config.encrypted) {
+            console.log("🔒 Encrypted Queue Join Init...");
+            // TODO: Fetch Validator Key from on-chain Registry or Delegate Account
+            // For now, using a mock dummy key for demonstration of the flow
+            // In PROD: const validatorKey = await this.getValidatorKey(queue);
+            const mockValidatorKey = await this.encryption.createMockValidatorKey(); // Valid P-256 Public Key
+            
+            // Perform Encryption
+            // Real payload would vary (e.g. Rock/Paper/Scissor choice)
+            const payload = Buffer.from("PLAYER_CHOICE_ROCK");
+            const { encrypted, clientPublicKey } = await this.encryption.encryptPayload(payload, mockValidatorKey);
+            console.log("🔒 Payload Encrypted. Client PubKey:", Buffer.from(clientPublicKey).toString('hex'));
+            
+            // In a real implementation, 'encrypted' and 'clientPublicKey' would be passed 
+            // as arguments to the 'joinQueue' instruction modification.
+            // Since the IDL isn't updated for arguments yet, we just log it.
+        }
+
         const tx = await this.program.methods
             .joinQueue()
             .accounts({
                 queue: queue,
-                // page: pagePda, // Note: index is dynamic so verify if auto-resolve works. 
-                // Wait, index is NOT an argument to the instruction? It IS. joinQueue doesn't take args. 
-                // But it uses queue.write_page_index. Anchor client might not know the index.
-                // However, the lint error said 'playerStatus' does not exist. It didn't complain about 'page'.
-                // Update: I will comment only playerStatus and systemProgram for now.
+                // page: pagePda,
                 page: pagePda, 
                 // playerStatus: statusPda,
                 // playerAuthority: this.provider.wallet.publicKey,
@@ -148,7 +167,14 @@ export class MatchmakingClient {
             .rpc(this.config.confirmOptions);
 
         console.log(`Joined Queue at Page ${currentIndex}: ${tx} (Lock: ${statusPda.toBase58()})`);
-        return { tx, statusPda };
+        
+        // Future Logic: If SDK receives a return log/event indicating "Instant Match", parse it.
+        // For now, default to "Queued".
+        return { 
+            status: "Queued", 
+            tx, 
+            statusPda 
+        };
     }
 
     /**

@@ -2,8 +2,10 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::access_control::instructions::{
     CreatePermissionCpiBuilder, UpdatePermissionCpiBuilder,
 };
+
 use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs};
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
+
 use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
@@ -32,6 +34,7 @@ declare_id!("8dwsz5RRGiMd3E8wCyXNYimoQR8ovKdBb4yxVfGcoYsG");
 pub const PLAYER_CHOICE_SEED: &[u8] = b"player_choice";
 pub const GAME_SEED: &[u8] = b"game";
 pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile";
+pub const MATCHMAKING_ID: Pubkey = pubkey!("DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm");
 
 #[ephemeral]
 #[program]
@@ -381,7 +384,23 @@ pub mod anchor_rock_paper_scissor {
     /// Delegate account to the delegation program based on account type
     /// Set specific validator based on ER, see https://docs.magicblock.gg/pages/get-started/how-integrate-your-program/local-setup
     pub fn delegate_pda(ctx: Context<DelegatePda>, account_type: AccountType) -> Result<()> {
-        let seed_data = derive_seeds_from_account_type(&account_type);
+        let mut seed_data = derive_seeds_from_account_type(&account_type);
+
+        // Debug
+        if let AccountType::Game { game_id } = account_type {
+            msg!("Delegating Game ID: {}", game_id);
+        }
+        msg!("Deriving seeds...");
+
+        let (pda, bump) = Pubkey::find_program_address(
+            &seed_data.iter().map(|s| s.as_slice()).collect::<Vec<_>>(),
+            &crate::ID,
+        );
+        msg!("Bump: {}", bump);
+        msg!("PDA Derived: {}", pda);
+        require_keys_eq!(pda, ctx.accounts.pda.key(), GameError::InvalidPda);
+
+        seed_data.push(vec![bump]);
         let seeds_refs: Vec<&[u8]> = seed_data.iter().map(|s| s.as_slice()).collect();
 
         let validator = ctx.accounts.validator.as_ref().map(|v| v.key());
@@ -429,6 +448,29 @@ pub mod anchor_rock_paper_scissor {
             .system_program(&system_program)
             .args(MembersArgs { members })
             .invoke_signed(&[seed_refs.as_slice()])?;
+        Ok(())
+    }
+    // 5️⃣ Close Game (Cleanup)
+    pub fn close_game(ctx: Context<CloseGame>, _game_id: u64) -> Result<()> {
+        msg!("Closing Game Account: {}", ctx.accounts.game.key());
+        Ok(())
+    }
+
+    // 6️⃣ Close Player Choice (Cleanup)
+    pub fn close_player_choice(ctx: Context<ClosePlayerChoice>, _game_id: u64) -> Result<()> {
+        msg!(
+            "Closing Player Choice: {}",
+            ctx.accounts.player_choice.key()
+        );
+        Ok(())
+    }
+
+    // 7️⃣ Close Player Profile (Cleanup)
+    pub fn close_player_profile(ctx: Context<ClosePlayerProfile>) -> Result<()> {
+        msg!(
+            "Closing Player Profile: {}",
+            ctx.accounts.player_profile.key()
+        );
         Ok(())
     }
 }
@@ -525,6 +567,7 @@ pub struct RevealWinner<'info> {
 
     /// The PDA that is the authority of the queue (must sign for unlock)
     #[account(
+        mut,
         seeds = [b"queue-authority"],
         bump
     )]
@@ -539,15 +582,16 @@ pub struct RevealWinner<'info> {
     #[account(mut)]
     pub player2_status: UncheckedAccount<'info>,
 
-    pub matchmaking_program: Program<'info, PrivateMatchmaking>,
-
-    /// Anyone can trigger this
-    /// Anyone can trigger this
-    #[account(mut)]
-    pub payer: Signer<'info>,
+    /// CHECK: Forced ID check
+    #[account(address = MATCHMAKING_ID)]
+    pub matchmaking_program: UncheckedAccount<'info>,
     /// CHECK: PERMISSION PROGRAM
     #[account(address = PERMISSION_PROGRAM_ID)]
     pub permission_program: UncheckedAccount<'info>,
+
+    /// Anyone can trigger this
+    #[account(mut)]
+    pub payer: Signer<'info>,
 }
 
 /// Unified delegate PDA context
@@ -629,6 +673,8 @@ pub enum GameError {
     MissingOpponent,
     #[msg("Game is already full.")]
     GameFull,
+    #[msg("Invalid PDA derived.")]
+    InvalidPda,
 }
 
 #[derive(Accounts)]
@@ -713,11 +759,15 @@ pub struct InitializeMsgQueue<'info> {
 
     #[account(mut)]
     pub payer: Signer<'info>,
-
+    /// CHECK: PERMISSION PROGRAM
+    #[account(address = PERMISSION_PROGRAM_ID)]
+    pub permission_program: UncheckedAccount<'info>,
     /// CHECK: Tenant ID
     pub tenant_program_id: UncheckedAccount<'info>,
 
-    pub matchmaking_program: Program<'info, PrivateMatchmaking>,
+    /// CHECK: Forced ID check
+    #[account(address = MATCHMAKING_ID)]
+    pub matchmaking_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -744,4 +794,45 @@ fn derive_seeds_from_account_type(account_type: &AccountType) -> Vec<Vec<u8>> {
             vec![PLAYER_PROFILE_SEED.to_vec(), player.to_bytes().to_vec()]
         }
     }
+}
+
+#[derive(Accounts)]
+#[instruction(game_id: u64)]
+pub struct CloseGame<'info> {
+    #[account(
+        mut,
+        close = payer,
+        seeds = [GAME_SEED, &game_id.to_le_bytes()],
+        bump
+    )]
+    pub game: Account<'info, Game>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(game_id: u64)]
+pub struct ClosePlayerChoice<'info> {
+    #[account(
+        mut,
+        close = payer,
+        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), payer.key().as_ref()],
+        bump
+    )]
+    pub player_choice: Account<'info, PlayerChoice>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClosePlayerProfile<'info> {
+    #[account(
+        mut,
+        close = payer,
+        seeds = [PLAYER_PROFILE_SEED, payer.key().as_ref()],
+        bump
+    )]
+    pub player_profile: Account<'info, PlayerProfile>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
 }

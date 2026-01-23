@@ -1,5 +1,6 @@
 import { IdlAccounts, Idl } from "@coral-xyz/anchor";
 import { PrivateMatchmaking } from "./idl/private_matchmaking";
+import { PublicKey } from "@solana/web3.js";
 
 export { PrivateMatchmaking };
 
@@ -18,4 +19,23 @@ export interface MatchmakingClientConfig {
      * (Not fully implemented in v1, but good for future proofing)
      */
     payer?: import("@solana/web3.js").PublicKey;
+
+    /**
+     * Enable Client-Side Encryption for queue inputs using TEE Handshake.
+     * Default: false
+     */
+   encrypted?: boolean;
 }
+
+export interface MatchEvent {
+    queue: PublicKey;
+    playerA: PublicKey;
+    playerB: PublicKey;
+    eloA: import("@coral-xyz/anchor").BN;
+    eloB: import("@coral-xyz/anchor").BN;
+    timestamp: import("@coral-xyz/anchor").BN;
+}
+
+export type JoinQueueResult = 
+    | { status: "Queued"; tx: string; statusPda: PublicKey }
+    | { status: "Matched"; tx: string; match: MatchEvent };
