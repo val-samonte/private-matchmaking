@@ -562,6 +562,12 @@ export type PrivateMatchmaking = {
           ]
         },
         {
+          "name": "tenantProgram",
+          "docs": [
+             "The Tenant Program (Game)"
+          ]
+        },
+        {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }

@@ -149,13 +149,13 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         // Player 1 Joins
         const providerP1 = new anchor.AnchorProvider(provider.connection, new anchor.Wallet(player1), {});
         const clientP1 = new MatchmakingClient(providerP1, matchmakingProgram.programId);
-        await clientP1.joinQueue(queuePda, player1Profile, provider.wallet.publicKey);
+        await clientP1.joinQueue(queuePda, player1Profile, rpsProgram.programId);
         console.log("✅ Player 1 Joined Queue");
 
         // Player 2 Joins
         const providerP2 = new anchor.AnchorProvider(provider.connection, new anchor.Wallet(player2), {});
         const clientP2 = new MatchmakingClient(providerP2, matchmakingProgram.programId);
-        await clientP2.joinQueue(queuePda, player2Profile, provider.wallet.publicKey);
+        await clientP2.joinQueue(queuePda, player2Profile, rpsProgram.programId);
         console.log("✅ Player 2 Joined Queue");
     });
 
@@ -297,18 +297,23 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
            await rpsProgram.methods.revealWinner()
            .accounts({
                 // @ts-ignore
+                game: gamePda,
+                player1Choice: p1ChoicePda,
+                player2Choice: p2ChoicePda,
                 player1Profile: player1Profile,
-                // @ts-ignore
                 player2Profile: player2Profile,
-                
-                // CPI Accounts for Matchmaking unlock
+                permissionGame: provider.wallet.publicKey, // Mock
+                permission1: provider.wallet.publicKey, // Mock
+                permission2: provider.wallet.publicKey, // Mock
                 queue: queuePda,
+                player1Wallet: player1.publicKey,
+                player2Wallet: player2.publicKey,
                 authority: queueAuthorityPda,
                 player1Status: p1Status,
                 player2Status: p2Status,
-                player1Wallet: player1.publicKey,
-                player2Wallet: player2.publicKey,
                 matchmakingProgram: matchmakingProgram.programId,
+                payer: provider.wallet.publicKey,
+                permissionProgram: new PublicKey("ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"), // Devnet ID
            })
            .rpc();
            console.log("✅ Reveal Winner Executed (Unexpected on L1 without TEE mocks)");

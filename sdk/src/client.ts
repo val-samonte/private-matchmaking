@@ -141,6 +141,7 @@ export class MatchmakingClient {
                 // playerStatus: statusPda,
                 // playerAuthority: this.provider.wallet.publicKey,
                 playerGameAccount: playerGameAccount,
+                tenantProgram: tenantProgramId, // Added for Matchable Interface CPI
                 // systemProgram: SystemProgram.programId,
             })
             .rpc(this.config.confirmOptions);

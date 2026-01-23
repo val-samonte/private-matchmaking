@@ -26,15 +26,15 @@ impl QueueHead {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
 pub struct QueueConfig {
-    pub elo_offset: u32, // Where to find ELO in the player account
-    pub elo_type: u8,    // 0: u32, 1: u64, 2: i32
+    // 7.2 Matchable Interface: No longer need data offsets. 
+    // The Tenant Program must implement `get_player_elo` instruction (Matchable Interface).
     pub match_threshold: u32, // +/- ELO difference allowed
     pub search_window: u32,   // in seconds
     pub reserved: [u8; 64],
 }
 
 impl QueueConfig {
-    pub const LEN: usize = 4 + 1 + 4 + 4 + 64;
+    pub const LEN: usize = 4 + 4 + 64;
 }
 
 #[account]

@@ -116,8 +116,43 @@ pub mod private_matchmaking {
         player_status.joined_at = Clock::get()?.unix_timestamp;
         player_status.bump = ctx.bumps.player_status;
 
-        // 3. Parse ELO (Universal Adapter)
-        let elo_value = parse_elo(player_account_info, &queue.config)?;
+        // 3. Fetch ELO via Matchable Interface (CPI)
+        // Discriminator for "get_player_elo": [152, 215, 176, 147, 124, 115, 254, 253]
+        let instruction_data = vec![
+            152, 215, 176, 147, 124, 115, 254, 253
+        ];
+        
+        let account_metas = vec![
+            AccountMeta::new_readonly(player_account_info.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.player_authority.key(), false),
+        ];
+
+        let instruction = anchor_lang::solana_program::instruction::Instruction {
+            program_id: ctx.accounts.tenant_program.key(),
+            accounts: account_metas,
+            data: instruction_data,
+        };
+
+        let account_infos = [
+            ctx.accounts.tenant_program.to_account_info(),
+            player_account_info.to_account_info(), // player_profile
+            ctx.accounts.player_authority.to_account_info(), // player
+        ];
+
+        msg!("Invoking Matchable Interface (get_player_elo)...");
+        anchor_lang::solana_program::program::invoke(
+            &instruction,
+            &account_infos,
+        )?;
+        
+        // Deserialize Return Data
+        let (key, return_data) = anchor_lang::solana_program::program::get_return_data()
+            .ok_or(MatchError::InvalidAccountOwner)?; // Better error needed: E.g., NoReturnData
+        
+        require!(key == ctx.accounts.tenant_program.key(), MatchError::InvalidAccountOwner);
+        
+        let elo_value = u64::try_from_slice(&return_data).map_err(|_| MatchError::AccountTooSmall)?;
+        msg!("Fetched ELO from Tenant: {}", elo_value);
 
         // 4. Add Player
         page.players.push(PlayerEntry {
@@ -219,34 +254,7 @@ pub mod private_matchmaking {
 
 // --- Helpers ---
 
-fn parse_elo(account: &AccountInfo, config: &QueueConfig) -> Result<u64> {
-    let data = account.try_borrow_data()?;
-    let offset = config.elo_offset as usize;
-    
-    // Bounds check
-    if data.len() < offset + 4 { 
-        return err!(MatchError::AccountTooSmall);
-    }
-
-    match config.elo_type {
-        0 => { // u32
-             if data.len() < offset + 4 { return err!(MatchError::AccountTooSmall); }
-             let val = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap());
-             Ok(val as u64)
-        },
-        1 => { // u64
-             if data.len() < offset + 8 { return err!(MatchError::AccountTooSmall); }
-             let val = u64::from_le_bytes(data[offset..offset+8].try_into().unwrap());
-             Ok(val)
-        },
-        2 => { // i32
-             if data.len() < offset + 4 { return err!(MatchError::AccountTooSmall); }
-             let val = i32::from_le_bytes(data[offset..offset+4].try_into().unwrap());
-             Ok(val as u64) 
-        },
-        _ => err!(MatchError::InvalidEloType),
-    }
-}
+// 7.2 Matchable Interface: Replaced internal parsing with CPI.
 
 // --- Contexts ---
 
@@ -348,6 +356,11 @@ pub struct JoinQueue<'info> {
     /// CHECK: Checked via ownership against tenant_program_id inside instructions
     pub player_game_account: UncheckedAccount<'info>,
     
+    /// CHECK: The Tenant Program (Game) to call GetPlayerElo on.
+    /// MUST match the queue.tenant_program_id.
+    #[account(constraint = tenant_program.key() == queue.tenant_program_id)]
+    pub tenant_program: UncheckedAccount<'info>,
+
     pub system_program: Program<'info, System>,
 }
 

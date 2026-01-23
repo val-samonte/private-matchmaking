@@ -79,8 +79,7 @@ pub mod anchor_rock_paper_scissor {
         let cpi_program = ctx.accounts.matchmaking_program.to_account_info();
         
         let config = private_matchmaking::state::queue::QueueConfig {
-            elo_offset: 8, 
-            elo_type: 1,   
+            // Matchable Interface: No offset/type needed
             match_threshold: 1000,
             search_window: 60,
             reserved: [0; 64],
@@ -213,6 +212,13 @@ pub mod anchor_rock_paper_scissor {
         );
 
         Ok(())
+    }
+
+    // 7.2 Matchable Interface: Get Player ELO (Public/CPI)
+    pub fn get_player_elo(ctx: Context<GetPlayerElo>) -> Result<u64> {
+        let profile = &ctx.accounts.player_profile;
+        msg!("Matchable Interface: returning ELO {}", profile.elo);
+        Ok(profile.elo)
     }
 
     // 4️⃣ Reveal and record the winner
@@ -641,6 +647,25 @@ pub struct PlayerProfile {
 
 impl PlayerProfile {
     pub const LEN: usize = 8 + 32 + 8 + 8;
+}
+
+// 7.2 Matchable Interface Implementation
+#[derive(Accounts)]
+pub struct GetPlayerElo<'info> {
+    #[account(
+        seeds = [PLAYER_PROFILE_SEED, player.key().as_ref()],
+        bump,
+        constraint = player_profile.authority == player.key() @ GameError::MissingOpponent // Reusing an error or just default
+    )]
+    pub player_profile: Account<'info, PlayerProfile>,
+    
+    /// CHECK: The player wallet to look up
+    pub player: UncheckedAccount<'info>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize)]
+pub struct PlayerEloResult {
+    pub elo: u64,
 }
 
 #[derive(Accounts)]
