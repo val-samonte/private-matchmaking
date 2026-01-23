@@ -120,21 +120,8 @@ pub mod anchor_rock_paper_scissor {
 
         // 3️⃣ Delegate Queue to Ephemeral Rollup (Privacy Fix)
         // This moves the queue state to the TEE, making it invisible to standard RPCs
-        let cpi_accounts_delegate = private_matchmaking::cpi::accounts::DelegateQueue {
-            pda: ctx.accounts.queue.to_account_info(), // The Queue PDA
-            authority: ctx.accounts.authority.to_account_info(),
-            payer: ctx.accounts.payer.to_account_info(),
-            validator: ctx.accounts.system_program.to_account_info(), // Temporary placeholder or specific validator if needed? 
-            // The `delegate_queue` instruction expects `Option<AccountInfo>`.
-            // In Anchor CPI, `Option` args are passed in instruction data, but `validator` account is an AccountInfo.
-            // Wait, looking at `private-matchmaking` definition:
-            // pub struct DelegateQueue<'info> { ... pub validator: Option<AccountInfo<'info>>, ... }
-            // In CPI crate `accounts`, is `validator` an `Option<AccountInfo>` or just `AccountInfo` (optional)?
-            // Usually generated CPI structs field is `pub validator: Option<AccountInfo<'info>>`.
-            // Let's check `private_matchmaking::cpi::accounts::DelegateQueue`.
-            // The `private-matchmaking` crate uses `ephemeral_rollups_sdk` macros.
-            // I'll assume `Option<AccountInfo>` structure.
-        };
+        // 3️⃣ Delegate Queue to Ephemeral Rollup (Privacy Fix)
+        // This moves the queue state to the TEE, making it invisible to standard RPCs
         
         // Actually, for simplicity and to match `private-matchmaking` definition which might use `param` for validator?
         // Let's look at `programs/private-matchmaking/src/lib.rs`:
@@ -159,7 +146,13 @@ pub mod anchor_rock_paper_scissor {
             pda: ctx.accounts.queue.to_account_info(),
             authority: ctx.accounts.authority.to_account_info(),
             payer: ctx.accounts.payer.to_account_info(),
-            validator: None, 
+            validator: Some(ctx.accounts.system_program.to_account_info()), // Use SystemProgram as placeholder validator
+            buffer_pda: ctx.accounts.buffer_pda.to_account_info(),
+            delegation_record_pda: ctx.accounts.delegation_record_pda.to_account_info(),
+            delegation_metadata_pda: ctx.accounts.delegation_metadata_pda.to_account_info(),
+            delegation_program: ctx.accounts.delegation_program.to_account_info(),
+            owner_program: ctx.accounts.matchmaking_program.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
         };
          
         let cpi_ctx_delegate = CpiContext::new_with_signer(cpi_program, cpi_accounts_delegate, signer);
@@ -669,6 +662,19 @@ pub struct InitializeMsgQueue<'info> {
         bump
     )] 
     pub authority: SystemAccount<'info>, 
+    
+    // Delegation Accounts
+    /// CHECK: Buffer for delegation
+    #[account(mut)]
+    pub buffer_pda: UncheckedAccount<'info>,
+    /// CHECK: Delegation Record
+    #[account(mut)]
+    pub delegation_record_pda: UncheckedAccount<'info>,
+    /// CHECK: Delegation Metadata
+    #[account(mut)]
+    pub delegation_metadata_pda: UncheckedAccount<'info>,
+    /// CHECK: Delegation Program
+    pub delegation_program: UncheckedAccount<'info>, 
     
     #[account(mut)]
     pub payer: Signer<'info>, 

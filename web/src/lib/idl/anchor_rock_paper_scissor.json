@@ -8,91 +8,6 @@
   },
   "instructions": [
     {
-      "name": "create_game",
-      "discriminator": [
-        124,
-        69,
-        75,
-        66,
-        184,
-        220,
-        72,
-        206
-      ],
-      "accounts": [
-        {
-          "name": "game",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  97,
-                  109,
-                  101
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "game_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "player_choice",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114,
-                  95,
-                  99,
-                  104,
-                  111,
-                  105,
-                  99,
-                  101
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "game_id"
-              },
-              {
-                "kind": "account",
-                "path": "player1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "player1",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "game_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
       "name": "create_permission",
       "docs": [
         "Creates a permission based on account type input.",
@@ -391,6 +306,21 @@
           }
         },
         {
+          "name": "buffer_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_record_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_program"
+        },
+        {
           "name": "payer",
           "writable": true,
           "signer": true
@@ -484,16 +414,16 @@
       ]
     },
     {
-      "name": "join_game",
+      "name": "join_session",
       "discriminator": [
-        107,
-        112,
-        18,
-        38,
+        23,
+        92,
+        4,
+        160,
+        155,
         56,
-        173,
-        60,
-        128
+        164,
+        253
       ],
       "accounts": [
         {

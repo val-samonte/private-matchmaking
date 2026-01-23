@@ -70,6 +70,21 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
              matchmakingProgram.programId
         )[0];
 
+        const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+        
+        const [bufferPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("buffer"), queuePda.toBuffer()],
+            DELEGATION_PROGRAM_ID
+        );
+        const [delegationRecordPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("delegation"), queuePda.toBuffer()],
+            DELEGATION_PROGRAM_ID
+        );
+        const [delegationMetadataPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("delegation-metadata"), queuePda.toBuffer()],
+            DELEGATION_PROGRAM_ID
+        );
+
         try {
              await rpsProgram.methods
              .initializeMsgQueue(queueId, 2, 10)
@@ -80,6 +95,10 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
                  payer: provider.wallet.publicKey,
                  tenantProgramId: rpsProgram.programId,
                  matchmakingProgram: matchmakingProgram.programId,
+                 bufferPda,
+                 delegationRecordPda,
+                 delegationMetadataPda,
+                 delegationProgram: DELEGATION_PROGRAM_ID
              })
              .rpc();
              console.log(`✅ Queue Initialized via CPI: ${queuePda.toBase58()} (ID: ${queueId})`);
@@ -165,7 +184,7 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         // For this demo, P1 creates the game sharing the ID with P2.
         const gameId = new BN(Date.now()); 
         
-        // --- 1. Create Game (Player 1) ---
+        // --- 1. Join Session (Player 1) ---
         const [gamePda] = PublicKey.findProgramAddressSync(
             [GAME_SEED, gameId.toArrayLike(Buffer, "le", 8)],
             rpsProgram.programId
@@ -176,34 +195,36 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         );
 
         await rpsProgram.methods
-            .createGame(gameId)
+            .joinSession(gameId)
             .accounts({
-                // game: gamePda,
-                // playerChoice: p1ChoicePda,
-                player1: player1.publicKey,
-                // systemProgram: SystemProgram.programId,
+                // @ts-ignore
+                game: gamePda,
+                playerChoice: p1ChoicePda,
+                player: player1.publicKey,
+                systemProgram: SystemProgram.programId,
             })
             .signers([player1])
             .rpc();
-        console.log(`🎮 Game Created ${gameId.toString()} by Player 1`);
+        console.log(`🎮 Player 1 Connected to Session ${gameId.toString()}`);
 
-        // --- 2. Join Game (Player 2) ---
+        // --- 2. Join Session (Player 2) ---
         const [p2ChoicePda] = PublicKey.findProgramAddressSync(
             [PLAYER_CHOICE_SEED, gameId.toArrayLike(Buffer, "le", 8), player2.publicKey.toBuffer()],
             rpsProgram.programId
         );
 
         await rpsProgram.methods
-            .joinGame(gameId)
+            .joinSession(gameId)
             .accounts({
-                // game: gamePda,
-                // playerChoice: p2ChoicePda,
+                // @ts-ignore
+                game: gamePda,
+                playerChoice: p2ChoicePda,
                 player: player2.publicKey,
-                // systemProgram: SystemProgram.programId,
+                systemProgram: SystemProgram.programId,
             })
             .signers([player2])
             .rpc();
-        console.log("🎮 Player 2 Joined Game");
+        console.log("🎮 Player 2 Connected to Session");
 
         // --- 3. Make Choices (Confidential) ---
         // P1 chooses ROCK
