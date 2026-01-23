@@ -26,9 +26,9 @@ pub mod errors {
     }
 }
 
-use state::*;
 
-declare_id!("GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"); 
+
+declare_id!("DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"); 
 
 #[ephemeral]
 #[program]
@@ -98,12 +98,35 @@ pub mod private_matchmaking {
     }
 
     pub fn join_queue(ctx: Context<JoinQueue>) -> Result<()> {
-        let queue = &mut ctx.accounts.queue;
+        let queue_info = &ctx.accounts.queue;
         let page = &mut ctx.accounts.page;
         let player_status = &mut ctx.accounts.player_status;
         let player_account_info = &ctx.accounts.player_game_account;
 
-        // 1. Verify Ownership
+        // Manual Deserialization of Queue
+        let mut data = queue_info.try_borrow_mut_data()?;
+        if data.len() < 8 { return err!(MatchError::InvalidAccountOwner); }
+        let mut queue = QueueHead::try_deserialize(&mut data.as_ref())?;
+
+        // 0. Manual Constraints Check
+        // Check 1: tenant_program == queue.tenant_program_id
+        require!(
+            ctx.accounts.tenant_program.key() == queue.tenant_program_id,
+            MatchError::InvalidAccountOwner
+        );
+
+        // Check 2: Verify `page` address matches `queue` and `write_page_index`
+        let (expected_page_key, _bump) = Pubkey::find_program_address(
+            &[
+                b"page", 
+                queue_info.key().as_ref(), 
+                &(queue.write_page_index % queue.capacity as u64).to_le_bytes()
+            ],
+            &crate::ID
+        );
+        require_keys_eq!(page.key(), expected_page_key, MatchError::IndexOutOfBounds);
+
+        // 1. Verify Player Ownership
         require!(
             player_account_info.owner == &queue.tenant_program_id,
             MatchError::InvalidAccountOwner
@@ -111,7 +134,7 @@ pub mod private_matchmaking {
         
         // 2. Lock Player (Prevent Double Queue)
         player_status.player = ctx.accounts.player_authority.key();
-        player_status.queue = queue.key();
+        player_status.queue = queue_info.key();
         player_status.in_match = false;
         player_status.joined_at = Clock::get()?.unix_timestamp;
         player_status.bump = ctx.bumps.player_status;
@@ -173,18 +196,47 @@ pub mod private_matchmaking {
             }
         }
 
+        // SERIALIZE BACK QUEUE STATE
+        // We must re-borrow mutably to write back
+        // Note: data variable from start is still alive but borrowed immutable or mutable? 
+        // queue_info.try_borrow_mut_data() returns RefMut. 
+        // try_deserialize takes &mut &[u8].
+        // We need to write 'queue' (the struct) back to the account data.
+        queue.try_serialize(&mut *data)?;
+
         Ok(())
     }
     
-    pub fn unlock_player(_ctx: Context<UnlockPlayer>) -> Result<()> {
+    pub fn unlock_player(ctx: Context<UnlockPlayer>) -> Result<()> {
+        // Manual Verification of Queue Authority (since Queue might be delegated/owned by ER)
+        let queue_info = &ctx.accounts.queue;
+        let authority_key = ctx.accounts.authority.key();
+        
+        // Deserialize QueueHead
+        // Ensure we handle potential data borrowing errors or empty data
+        let data = queue_info.try_borrow_data()?;
+        if data.len() < 8 {
+             return err!(MatchError::InvalidAccountOwner); // Reuse error or add invalid queue error
+        }
+        
+        let queue_head = QueueHead::try_deserialize(&mut data.as_ref())?;
+        require!(queue_head.authority == authority_key, MatchError::InvalidAccountOwner);
+
         // Just closing the account refunds the rent to the 'player' (destination).
         msg!("Player unlocked by Authority. Rent refunded to Player.");
         Ok(())
     }
 
     pub fn process_match(ctx: Context<ProcessMatch>, _page_index: u64) -> Result<()> {
-        let queue = &ctx.accounts.queue;
+        let queue_info = &ctx.accounts.queue_account;
         let page = &mut ctx.accounts.page;
+        
+        let data = queue_info.try_borrow_data()?;
+        if data.len() < 8 {
+             return err!(MatchError::InvalidAccountOwner);
+        }
+        let queue = QueueHead::try_deserialize(&mut data.as_ref())?;
+        
         let config = &queue.config;
         
         let mut matches = Vec::new();
@@ -205,7 +257,7 @@ pub mod private_matchmaking {
                 
                 if diff <= config.match_threshold as u64 {
                     emit!(MatchFound {
-                        queue: queue.key(),
+                        queue: queue_info.key(),
                         player_a: p1.authority,
                         player_b: p2.authority,
                         elo_a: p1.elo,
@@ -318,7 +370,9 @@ pub struct DelegateQueue<'info> {
     pub pda: AccountInfo<'info>,
     
     pub authority: Signer<'info>,
+    #[account(mut)]
     pub payer: Signer<'info>,
+    
     /// CHECK: Checked by the delegate program logic
     pub validator: Option<AccountInfo<'info>>,
 }
@@ -326,17 +380,10 @@ pub struct DelegateQueue<'info> {
 #[derive(Accounts)]
 pub struct JoinQueue<'info> {
     #[account(mut)]
-    pub queue: Account<'info, QueueHead>,
+    /// CHECK: Manually deserialized to support delegated queues
+    pub queue: UncheckedAccount<'info>,
     
-    #[account(
-        mut,
-        seeds = [
-            b"page",
-            queue.key().as_ref(),
-            &(queue.write_page_index % queue.capacity as u64).to_le_bytes()
-        ],
-        bump
-    )]
+    #[account(mut)]
     pub page: Account<'info, QueuePage>,
     
     /// CHECK: This account locks the player from joining other queues.
@@ -357,8 +404,7 @@ pub struct JoinQueue<'info> {
     pub player_game_account: UncheckedAccount<'info>,
     
     /// CHECK: The Tenant Program (Game) to call GetPlayerElo on.
-    /// MUST match the queue.tenant_program_id.
-    #[account(constraint = tenant_program.key() == queue.tenant_program_id)]
+    /// MUST match the queue.tenant_program_id (Checked manually).
     pub tenant_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
@@ -366,8 +412,8 @@ pub struct JoinQueue<'info> {
 
 #[derive(Accounts)]
 pub struct UnlockPlayer<'info> {
-    #[account(has_one = authority)]
-    pub queue: Account<'info, QueueHead>,
+    /// CHECK: Manually deserialized to verify authority (supports delegated queues)
+    pub queue: UncheckedAccount<'info>,
     
     #[account(mut)]
     pub authority: Signer<'info>, // The Game Authority (Queue Owner)
@@ -393,12 +439,13 @@ pub struct UnlockPlayer<'info> {
 #[derive(Accounts)]
 #[instruction(page_index: u64)]
 pub struct ProcessMatch<'info> {
+    /// CHECK: Manually deserialized to support delegated queues
     #[account(mut)]
-    pub queue: Account<'info, QueueHead>,
+    pub queue_account: UncheckedAccount<'info>,
     
     #[account(
         mut,
-        seeds = [b"page", queue.key().as_ref(), &page_index.to_le_bytes()],
+        seeds = [b"page", queue_account.key().as_ref(), &page_index.to_le_bytes()],
         bump
     )]
     pub page: Account<'info, QueuePage>,

@@ -1,57 +1,94 @@
 const { PublicKey } = require("@solana/web3.js");
 
-const UNKNOWN_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"); // Devnet Delegation
+// From Anchor.toml
+const MATCHMAKING_PID = new PublicKey("DYDe2VCrFjzxy9zuovGeum67kYybr65G6Zbxt9gPJP1f");
+const RPS_PID = new PublicKey("6yDcqjPGroT8SRrANaKaLi5aM6YMJmSwux69Ukm8cqQx");
 
-// Error Log Values
-const LEFT = "CfMpt6uohWgBvSnNiXwQexqgqrMNAzpWqwfXtzMz7trH"; // Expected by Program
-const RIGHT = "7SYn9CuZTiCNJpuWkqysFwK8xFSoefWr6pLog7Ytv48s"; // Passed by Client
+// Delegation IDs
+const DELEGATION_PID_DEVNET = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+const DELEGATION_PID_LOCAL = new PublicKey("BitvrRgxeoLsFBLeFxgz4xW28zKDPvBq7B5Wc2rY1t3h"); 
 
-// We suspect Right comes from ["buffer", Q]
-// We want to know what Q + Program produced Left.
+// From Logs
+const LOG_LEFT = "Fh68kkXwFDubEdkRRBuWCXBdTr2YtnM52ASA7fxHrbCw";
+const LOG_RIGHT = "FmbRjotTFdcQahKcaYuQdxDyzGY85s8Hg6q2fT5Hkagr";
 
-function findBuffer(queueKey, programId) {
+const QUEUE_ID = "rps-ranked-queue-debug-1"; 
+
+function derive(seed, key, pid) {
     return PublicKey.findProgramAddressSync(
-        [Buffer.from("buffer"), queueKey.toBuffer()],
-        programId
+        [Buffer.from(seed), key.toBuffer()],
+        pid
     )[0].toBase58();
 }
 
-async function main() {
+function main() {
     console.log("Analyzing Seed Mismatch (JS)...");
 
-    // We don't have Queue Key. 
-    // BUT we have Right = find("buffer", Q, P_right).
-    // If we iterate through common Queue Keys or reverse it? No can't reverse hash.
+    const [queueAuthorityPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("queue-authority")],
+        RPS_PID
+    );
+
+    const [queuePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("queue-head"), queueAuthorityPda.toBuffer(), Buffer.from(QUEUE_ID)],
+        MATCHMAKING_PID
+    );
+
+    const [delegationRecordPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("delegation"), queuePda.toBuffer()],
+        MATCHMAKING_PID
+    );
+    const [delegationMetadataPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("delegation-metadata"), queuePda.toBuffer()],
+        MATCHMAKING_PID
+    );
+
+    const keys = {
+        "QueuePda": queuePda,
+        "QueueAuth": queueAuthorityPda,
+        "Record": delegationRecordPda,
+        "Metadata": delegationMetadataPda,
+        "RPS_PID": RPS_PID, 
+        "Matchmaking_PID": MATCHMAKING_PID,
+    };
+
+    const pids = {
+        "Devnet": DELEGATION_PID_DEVNET,
+        "Local": DELEGATION_PID_LOCAL,
+        "RPS": RPS_PID,
+        "Matchmaking": MATCHMAKING_PID,
+    };
+
+    const seeds = ["buffer", "delegation", "delegation-metadata", "queue-head", "state", "val"];
     
-    // However, if we assume Right was generated correctly by valid code:
-    // Right = 7SYn9...
-    // Program used = DELeGG...
+    const SEARCH_TARGETS = {
+        "LEFT": LOG_LEFT,
+        "RIGHT": LOG_RIGHT
+    };
+
+    console.log("Searching for:", SEARCH_TARGETS);
     
-    // Can we verify if Left = 7SYn9...? 
-    // No, Left != Right.
-    
-    console.log("Left (Expected):", LEFT);
-    console.log("Right (Passed):", RIGHT);
-    
-    if (LEFT === RIGHT) {
-        console.log("MATCH! Wait, why did the error say seeds constraint violated?");
-    } else {
-        console.log("MISMATCH. Probing for cause...");
+    // Check strict equality first
+    for (const [tName, tVal] of Object.entries(SEARCH_TARGETS)) {
+        for (const [kName, kVal] of Object.entries(keys)) {
+             if (kVal.toBase58() === tVal) { console.log(`MATCH ${tName} == ${kName}`); }
+        }
     }
     
-    // Hypothesis: Program ID mismatch.
-    // Maybe Localnet Program ID (Default) was used by the macro?
-    // Localnet Delegation default is often different?
-    // "Bit..." something?
-    
-    // Or did we accidentally use the WRONG delegation program ID in the client?
-    // Is DELeGG... correct for Devnet?
-    // MagicBlock Docs say: DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
-    
-    // Maybe the 'queue' key is different?
-    // Impossible if we pass the same account.
-    
-    // Maybe the seed literal changed? "buffer_im" ?
+    // Brute force derivations
+    // Targeted Search
+    console.log("--- TARGETED SEARCH ---");
+    for (const [pName, pVal] of Object.entries(pids)) {
+        for (const [kName, kVal] of Object.entries(keys)) {
+            for (const s of seeds) {
+                try {
+                    const derived = derive(s, kVal, pVal);
+                    if (derived === LOG_LEFT) {
+                        console.log(`FOUND Fh68kk! => [${pName}] [${kName}] seed="${s}"`);
+                    }
+                } catch (e) {}
+            }
+        }
+    }
 }
-
 main();

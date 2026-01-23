@@ -1,5 +1,5 @@
 {
-  "address": "GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy",
+  "address": "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm",
   "metadata": {
     "name": "private_matchmaking",
     "version": "0.1.0",
@@ -191,38 +191,38 @@
             "program": {
               "kind": "const",
               "value": [
-                236,
-                134,
-                118,
-                86,
-                123,
-                251,
-                40,
-                83,
-                243,
-                243,
-                47,
-                156,
-                210,
                 187,
-                227,
-                192,
-                41,
-                10,
-                27,
-                114,
-                159,
-                200,
-                43,
-                167,
-                18,
-                212,
-                10,
-                202,
-                114,
+                145,
                 71,
-                43,
-                74
+                224,
+                31,
+                36,
+                128,
+                147,
+                29,
+                187,
+                82,
+                52,
+                119,
+                101,
+                210,
+                112,
+                67,
+                137,
+                5,
+                133,
+                51,
+                149,
+                134,
+                253,
+                182,
+                36,
+                207,
+                205,
+                109,
+                77,
+                127,
+                248
               ]
             }
           }
@@ -335,6 +335,7 @@
         },
         {
           "name": "payer",
+          "writable": true,
           "signer": true
         },
         {
@@ -343,7 +344,7 @@
         },
         {
           "name": "owner_program",
-          "address": "GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"
+          "address": "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"
         },
         {
           "name": "delegation_program",
@@ -556,6 +557,12 @@
           ]
         },
         {
+          "name": "tenant_program",
+          "docs": [
+            "MUST match the queue.tenant_program_id (Checked manually)."
+          ]
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -576,7 +583,7 @@
       ],
       "accounts": [
         {
-          "name": "queue",
+          "name": "queue_account",
           "writable": true
         },
         {
@@ -595,7 +602,7 @@
               },
               {
                 "kind": "account",
-                "path": "queue"
+                "path": "queue_account"
               },
               {
                 "kind": "arg",
@@ -700,10 +707,7 @@
         {
           "name": "authority",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "queue"
-          ]
+          "signer": true
         },
         {
           "name": "player_status",
@@ -937,14 +941,6 @@
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "elo_offset",
-            "type": "u32"
-          },
-          {
-            "name": "elo_type",
-            "type": "u8"
-          },
           {
             "name": "match_threshold",
             "type": "u32"

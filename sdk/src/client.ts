@@ -30,6 +30,7 @@ export class MatchmakingClient {
         // Load the IDL (we assume it's bundled or we can require it if running in node)
         // For SDK purity, we should import the JSON.
         const idl = require("./idl/private_matchmaking.json");
+        idl.address = programId.toBase58();
         this.program = new Program(idl, provider);
     }
 
@@ -189,7 +190,7 @@ export class MatchmakingClient {
         const tx = await this.program.methods
             .processMatch(new anchor.BN(pageIndex))
             .accounts({
-                queue: queue,
+                queueAccount: queue,
                 // page: pagePda,
             })
             .rpc(this.config.confirmOptions);

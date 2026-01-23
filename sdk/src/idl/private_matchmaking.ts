@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/private_matchmaking.json`.
  */
 export type PrivateMatchmaking = {
-  "address": "GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy",
+  "address": "DYDe2VCrFjzxy9zuovGeum67kYybr65G6Zbxt9gPJP1f",
   "metadata": {
     "name": "privateMatchmaking",
     "version": "0.1.0",
@@ -197,38 +197,38 @@ export type PrivateMatchmaking = {
             "program": {
               "kind": "const",
               "value": [
-                236,
-                134,
-                118,
-                86,
-                123,
-                251,
-                40,
+                186,
+                75,
+                137,
+                215,
+                241,
+                191,
                 83,
-                243,
-                243,
-                47,
-                156,
-                210,
-                187,
-                227,
-                192,
-                41,
-                10,
-                27,
-                114,
-                159,
-                200,
-                43,
-                167,
-                18,
-                212,
-                10,
-                202,
-                114,
+                129,
+                57,
+                126,
+                236,
+                131,
+                241,
+                98,
+                116,
+                32,
+                255,
+                94,
+                207,
+                189,
+                126,
+                244,
+                40,
+                252,
+                115,
                 71,
-                43,
-                74
+                34,
+                33,
+                50,
+                188,
+                53,
+                38
               ]
             }
           }
@@ -341,6 +341,7 @@ export type PrivateMatchmaking = {
         },
         {
           "name": "payer",
+          "writable": true,
           "signer": true
         },
         {
@@ -349,7 +350,7 @@ export type PrivateMatchmaking = {
         },
         {
           "name": "ownerProgram",
-          "address": "GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"
+          "address": "DYDe2VCrFjzxy9zuovGeum67kYybr65G6Zbxt9gPJP1f"
         },
         {
           "name": "delegationProgram",
@@ -564,7 +565,7 @@ export type PrivateMatchmaking = {
         {
           "name": "tenantProgram",
           "docs": [
-             "The Tenant Program (Game)"
+            "MUST match the queue.tenant_program_id."
           ]
         },
         {
@@ -588,7 +589,7 @@ export type PrivateMatchmaking = {
       ],
       "accounts": [
         {
-          "name": "queue",
+          "name": "queueAccount",
           "writable": true
         },
         {
@@ -607,7 +608,7 @@ export type PrivateMatchmaking = {
               },
               {
                 "kind": "account",
-                "path": "queue"
+                "path": "queueAccount"
               },
               {
                 "kind": "arg",
@@ -712,10 +713,7 @@ export type PrivateMatchmaking = {
         {
           "name": "authority",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "queue"
-          ]
+          "signer": true
         },
         {
           "name": "playerStatus",
@@ -949,14 +947,6 @@ export type PrivateMatchmaking = {
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "eloOffset",
-            "type": "u32"
-          },
-          {
-            "name": "eloType",
-            "type": "u8"
-          },
           {
             "name": "matchThreshold",
             "type": "u32"

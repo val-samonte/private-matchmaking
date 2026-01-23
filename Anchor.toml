@@ -6,8 +6,12 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-private_matchmaking = "GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"
-anchor_rock_paper_scissor = "HGddb95QNe62nMU9gB4Ga81PiBxL7ZpeLUtYcXcLWtgR"
+private_matchmaking = "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"
+anchor_rock_paper_scissor = "8dwsz5RRGiMd3E8wCyXNYimoQR8ovKdBb4yxVfGcoYsG"
+
+[programs.devnet]
+private_matchmaking = "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"
+anchor_rock_paper_scissor = "8dwsz5RRGiMd3E8wCyXNYimoQR8ovKdBb4yxVfGcoYsG"
 
 [registry]
 url = "https://api.apr.dev"

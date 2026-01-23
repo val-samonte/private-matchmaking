@@ -31,7 +31,7 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
 
     // Matchmaking Config
     let queuePda: PublicKey;
-    const queueId = `rps-ranked-queue-${Date.now()}`;
+    const queueId = "rps-ranked-queue-debug-1";
 
     // Helpers to fund players
     const fundPlayer = async (player: Keypair) => {
@@ -74,7 +74,7 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         
         const [bufferPda] = PublicKey.findProgramAddressSync(
             [Buffer.from("buffer"), queuePda.toBuffer()],
-            DELEGATION_PROGRAM_ID
+            matchmakingProgram.programId
         );
         const [delegationRecordPda] = PublicKey.findProgramAddressSync(
             [Buffer.from("delegation"), queuePda.toBuffer()],
@@ -84,6 +84,11 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
             [Buffer.from("delegation-metadata"), queuePda.toBuffer()],
             DELEGATION_PROGRAM_ID
         );
+
+
+        console.log("DEBUG: Matchmaking PID:", matchmakingProgram.programId.toBase58());
+        console.log("DEBUG: Buffer PDA:", bufferPda.toBase58());
+        console.log("DEBUG: Delegation Program ID:", DELEGATION_PROGRAM_ID.toBase58());
 
         try {
              await rpsProgram.methods

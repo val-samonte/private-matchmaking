@@ -4,7 +4,7 @@ import { PrivateMatchmaking } from "../target/types/private_matchmaking";
 import { PublicKey, SystemProgram, Keypair } from "@solana/web3.js";
 
 // Constants
-const PROGRAM_ID = new PublicKey("GvJ8sk3SAQfCHVAFdFyadFRsMjDojqWzeVteksAbsTJy"); 
+const PROGRAM_ID = new PublicKey("DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"); 
 
 export class MatchmakingClient {
     program: Program<PrivateMatchmaking>;
