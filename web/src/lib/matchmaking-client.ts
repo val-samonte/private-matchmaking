@@ -1,15 +1,15 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program, Idl, AnchorProvider } from "@coral-xyz/anchor";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { 
     PublicKey, 
-    SystemProgram, 
-    Keypair, 
     TransactionSignature,
-    ComputeBudgetProgram
+    ComputeBudgetProgram,
+    Keypair
 } from "@solana/web3.js";
 import { PrivateMatchmaking } from "./idl/private_matchmaking";
 import { MatchmakingClientConfig, QueueHead, QueuePage, PlayerStatus } from "./types";
-import { derivePagePda, derivePlayerStatusPda, deriveQueuePda } from "./utils";
+import { derivePagePda, derivePlayerStatusPda, deriveQueuePda } from "./matchmaking-utils";
+import idl from "./idl/private_matchmaking.json";
 
 // Default Validator for Devnet (MagicBlock)
 const DEFAULT_VALIDATOR = "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA";
@@ -21,20 +21,21 @@ export class MatchmakingClient {
 
     constructor(
         provider: AnchorProvider, 
-        programId: PublicKey,
+        programId?: PublicKey,
         config: MatchmakingClientConfig = {}
     ) {
         this.provider = provider;
         this.config = config;
         
-        // Load the IDL (we assume it's bundled or we can require it if running in node)
-        // For SDK purity, we should import the JSON.
-        const idl = require("./idl/private_matchmaking.json");
+        // Use the IDL JSON to initialize the program
+        // @ts-ignore
         this.program = new Program(idl, provider);
     }
 
+    // --- Core Matchmaking Methods ---
+
     /**
-     * Initialize a new matchmaking queue.
+     * Initialize a new matchmaking queue (Admin/Demo only).
      */
     async initializeQueue(
         queueId: string, 
@@ -43,17 +44,15 @@ export class MatchmakingClient {
         pageSize: number = 50
     ): Promise<PublicKey> {
         const queuePda = deriveQueuePda(this.program.programId, this.provider.wallet.publicKey, queueId);
-
+        
         // Ensure tenant ID is set
         const tenantProgramId = config.tenantProgramId || this.provider.wallet.publicKey;
 
         const tx = await this.program.methods
             .initializeQueue(queueId, config, capacity, pageSize)
             .accounts({
-                // queue: queuePda,
-                // authority: this.provider.wallet.publicKey,
+                // @ts-ignore
                 tenantProgramId: tenantProgramId,
-                // systemProgram: SystemProgram.programId,
             })
             .rpc(this.config.confirmOptions);
         
@@ -77,9 +76,6 @@ export class MatchmakingClient {
             .initializePage(new anchor.BN(index))
             .accounts({
                 queue: queue,
-                // page: pagePda,
-                // authority: this.provider.wallet.publicKey,
-                // systemProgram: SystemProgram.programId,
             })
             .rpc(this.config.confirmOptions);
             
@@ -88,36 +84,12 @@ export class MatchmakingClient {
     }
 
     /**
-     * Delegate the queue to the Privacy Layer (Ephemeral Rollup).
-     */
-    async delegateQueue(queueId: string, validatorOverride?: PublicKey): Promise<TransactionSignature> {
-        const validator = validatorOverride || new PublicKey(DEFAULT_VALIDATOR);
-        const queuePda = deriveQueuePda(this.program.programId, this.provider.wallet.publicKey, queueId);
-
-        const tx = await this.program.methods
-            .delegateQueue(queueId)
-            .preInstructions([
-                ComputeBudgetProgram.requestHeapFrame({ bytes: 256 * 1024 })
-            ])
-            .accounts({
-                // pda: queuePda,
-                // authority: this.provider.wallet.publicKey,
-                // payer: this.provider.wallet.publicKey,
-                validator: validator,
-            })
-            .rpc(this.config.confirmOptions);
-            
-        console.log(`Delegated Queue ${queueId}: ${tx}`);
-        return tx;
-    }
-
-    /**
      * Join the queue.
      */
     async joinQueue(
         queue: PublicKey, 
         playerGameAccount: PublicKey, 
-        tenantProgramId: PublicKey
+        // tenantProgramId: PublicKey
     ): Promise<{ tx: TransactionSignature, statusPda: PublicKey }> {
         // Fetch queue to determine current WRITE index
         const queueAccount = await this.getQueue(queue);
@@ -132,16 +104,9 @@ export class MatchmakingClient {
             .joinQueue()
             .accounts({
                 queue: queue,
-                // page: pagePda, // Note: index is dynamic so verify if auto-resolve works. 
-                // Wait, index is NOT an argument to the instruction? It IS. joinQueue doesn't take args. 
-                // But it uses queue.write_page_index. Anchor client might not know the index.
-                // However, the lint error said 'playerStatus' does not exist. It didn't complain about 'page'.
-                // Update: I will comment only playerStatus and systemProgram for now.
+                // @ts-ignore - anchor type resolution for dynamic PDAs can be tricky
                 page: pagePda, 
-                // playerStatus: statusPda,
-                // playerAuthority: this.provider.wallet.publicKey,
                 playerGameAccount: playerGameAccount,
-                // systemProgram: SystemProgram.programId,
             })
             .rpc(this.config.confirmOptions);
 
@@ -164,8 +129,6 @@ export class MatchmakingClient {
             .unlockPlayer()
             .accounts({
                 queue: queueAddress,
-                // authority: this.provider.wallet.publicKey,
-                // playerStatus: statusPda,
                 player: playerWallet,
                 playerGameAccount: playerGameAccount
             })
@@ -176,38 +139,24 @@ export class MatchmakingClient {
     }
 
     /**
-     * Process matches on a specific page.
-     * Usually called by the off-chain worker or manually for testing.
+     * Process a match (Crank).
      */
     async processMatch(
         queue: PublicKey,
         pageIndex: number
     ): Promise<TransactionSignature> {
         const pagePda = derivePagePda(this.program.programId, queue, pageIndex);
-
+        
         const tx = await this.program.methods
             .processMatch(new anchor.BN(pageIndex))
             .accounts({
                 queue: queue,
-                // page: pagePda,
+                // @ts-ignore
+                page: pagePda
             })
             .rpc(this.config.confirmOptions);
-
-        return tx;
-    }
-    
-    /**
-     * Resize the queue capacity.
-     */
-    async resizeQueue(queue: PublicKey, newCapacity: number): Promise<TransactionSignature> {
-        const tx = await this.program.methods
-            .resizeQueue(newCapacity)
-            .accounts({
-                queue: queue,
-                // authority: this.provider.wallet.publicKey,
-            })
-            .rpc(this.config.confirmOptions);
-        console.log(`Resized Queue to ${newCapacity}: ${tx}`);
+            
+        console.log(`Processed Match on Page ${pageIndex}: ${tx}`);
         return tx;
     }
 
@@ -228,56 +177,5 @@ export class MatchmakingClient {
     async getPlayerStatusForGameAccount(playerGameAccount: PublicKey): Promise<PlayerStatus> {
          const statusPda = derivePlayerStatusPda(this.program.programId, playerGameAccount);
          return await this.getPlayerStatus(statusPda);
-    }
-
-    // --- Dev Helpers ---
-
-    async createMockPlayer(
-        playerAccount: Keypair, 
-        elo: number
-    ): Promise<TransactionSignature> {
-        const tx = await this.program.methods
-            .createMockPlayer(new anchor.BN(elo))
-            .accounts({
-                playerAccount: playerAccount.publicKey,
-                authority: this.provider.wallet.publicKey,
-                // systemProgram: SystemProgram.programId,
-            })
-            .signers([playerAccount])
-            .rpc(this.config.confirmOptions);
-        return tx;
-    }
-
-    /**
-     * Close a queue page to reclaim rent.
-     */
-    async closePage(queue: PublicKey, index: number): Promise<TransactionSignature> {
-        const pagePda = derivePagePda(this.program.programId, queue, index);
-        const tx = await this.program.methods
-            .closePage(new anchor.BN(index))
-            .accounts({
-                queue: queue,
-                // page: pagePda, // Auto-resolved
-                authority: this.provider.wallet.publicKey,
-            })
-            .rpc(this.config.confirmOptions);
-        console.log(`Closed Page ${index}: ${pagePda.toBase58()}`);
-        return tx;
-    }
-
-    /**
-     * Close a queue head to reclaim rent.
-     */
-    async closeQueue(queueId: string): Promise<TransactionSignature> {
-        const queuePda = deriveQueuePda(this.program.programId, this.provider.wallet.publicKey, queueId);
-        const tx = await this.program.methods
-            .closeQueue(queueId)
-            .accounts({
-                // queue: queuePda, // Auto-resolved
-                authority: this.provider.wallet.publicKey,
-            })
-            .rpc(this.config.confirmOptions);
-        console.log(`Closed Queue: ${queuePda.toBase58()}`);
-        return tx;
     }
 }

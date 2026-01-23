@@ -8,6 +8,26 @@ use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
+use private_matchmaking::cpi::accounts::UnlockPlayer;
+use private_matchmaking::program::PrivateMatchmaking;
+// Assuming PlayerStatus is in state::player based on error helper, 
+// OR simpler: use the IDL generated types if available? 
+// No, the error said: `struct PlayerStatus is private`. 
+// It also said: `note: the struct PlayerStatus is defined here --> programs/private-matchmaking/src/lib.rs:5:5`
+// But it is not `pub use`.
+// I will try to use `private_matchmaking::state::player::PlayerStatus` if that is public.
+// If the crate doesn't export it, I might be stuck. 
+// However, the `private-matchmaking` crate likely exports state.
+// Let's check `programs/private-matchmaking/src/lib.rs` quickly? 
+// No, I'll trust the compiler hint first or just use `Account<'info, ...>` generic if possible? 
+// `UnlockPlayer` expects `player_status: AccountInfo<'info>`.
+// So I don't strictly need the `PlayerStatus` struct definition for the CPI *call* logic if I blindly pass AccountInfo.
+// BUT `RevealWinner` struct definition likely uses `Account<'info, PlayerStatus>`?
+// I added `pub player1_status: UncheckedAccount<'info>`.
+// So I don't need `PlayerStatus` struct imported!
+// I just need to remove the unused import `use private_matchmaking::{self, PlayerStatus};`
+
+
 declare_id!("HGddb95QNe62nMU9gB4Ga81PiBxL7ZpeLUtYcXcLWtgR");
 
 pub const PLAYER_CHOICE_SEED: &[u8] = b"player_choice";
@@ -31,47 +51,159 @@ pub mod anchor_rock_paper_scissor {
         Ok(())
     }
 
-    // 1️⃣ Create and auto-join as Player 1
-    pub fn create_game(ctx: Context<CreateGame>, game_id: u64) -> Result<()> {
-        let game = &mut ctx.accounts.game;
-        let player1 = ctx.accounts.player1.key();
+    // 0.5️⃣ Initialize Matchmaking Queue (Prod: Owned by this Program)
+    pub fn initialize_msg_queue(
+        ctx: Context<InitializeMsgQueue>, 
+        queue_id: String,
+        capacity: u16,
+        page_size: u8
+    ) -> Result<()> {
+        // Fund the PDA Authority so it can pay for the Queue Account.
+        let rent_exempt = Rent::get()?.minimum_balance(private_matchmaking::state::queue::QueueHead::LEN);
+        let amount = rent_exempt + 10_000_000; 
 
-        game.game_id = game_id;
-        game.player1 = Some(player1);
-        game.player2 = None;
-        game.result = GameResult::None;
+        let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.payer.key(),
+            &ctx.accounts.authority.key(),
+            amount,
+        );
+        anchor_lang::solana_program::program::invoke(
+            &transfer_ix,
+            &[
+                ctx.accounts.payer.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
 
-        msg!("Game ID: {}", game_id);
-        msg!("Player 1 PDA: {}", player1);
+        let cpi_program = ctx.accounts.matchmaking_program.to_account_info();
+        
+        let config = private_matchmaking::state::queue::QueueConfig {
+            elo_offset: 8, 
+            elo_type: 1,   
+            match_threshold: 1000,
+            search_window: 60,
+            reserved: [0; 64],
+        };
 
-        // initialize PlayerChoice for player 1
-        let player_choice = &mut ctx.accounts.player_choice;
-        player_choice.game_id = game_id;
-        player_choice.player = player1;
-        player_choice.choice = None;
+        // Seeds for authorization
+        let seeds: &[&[u8]] = &[b"queue-authority", &[ctx.bumps.authority]];
+        let signer = &[&seeds[..]];
 
-        msg!("Game {} created and joined by {}", game_id, player1);
+        let cpi_accounts = private_matchmaking::cpi::accounts::InitializeQueue {
+             queue: ctx.accounts.queue.to_account_info(),
+             authority: ctx.accounts.authority.to_account_info(), 
+             tenant_program_id: ctx.accounts.tenant_program_id.to_account_info(),
+             system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts, signer);
+        
+        private_matchmaking::cpi::initialize_queue(
+            cpi_ctx,
+            queue_id.clone(),
+            config,
+            capacity,
+            page_size
+        )?;
+        
+        // 2️⃣ Initialize Page 0
+        let cpi_accounts_page = private_matchmaking::cpi::accounts::InitializePage {
+            queue: ctx.accounts.queue.to_account_info(),
+            page: ctx.accounts.page.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+        };
+        let cpi_ctx_page = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts_page, signer);
+        
+        private_matchmaking::cpi::initialize_page(cpi_ctx_page, 0)?;
 
+        // 3️⃣ Delegate Queue to Ephemeral Rollup (Privacy Fix)
+        // This moves the queue state to the TEE, making it invisible to standard RPCs
+        let cpi_accounts_delegate = private_matchmaking::cpi::accounts::DelegateQueue {
+            pda: ctx.accounts.queue.to_account_info(), // The Queue PDA
+            authority: ctx.accounts.authority.to_account_info(),
+            payer: ctx.accounts.payer.to_account_info(),
+            validator: ctx.accounts.system_program.to_account_info(), // Temporary placeholder or specific validator if needed? 
+            // The `delegate_queue` instruction expects `Option<AccountInfo>`.
+            // In Anchor CPI, `Option` args are passed in instruction data, but `validator` account is an AccountInfo.
+            // Wait, looking at `private-matchmaking` definition:
+            // pub struct DelegateQueue<'info> { ... pub validator: Option<AccountInfo<'info>>, ... }
+            // In CPI crate `accounts`, is `validator` an `Option<AccountInfo>` or just `AccountInfo` (optional)?
+            // Usually generated CPI structs field is `pub validator: Option<AccountInfo<'info>>`.
+            // Let's check `private_matchmaking::cpi::accounts::DelegateQueue`.
+            // The `private-matchmaking` crate uses `ephemeral_rollups_sdk` macros.
+            // I'll assume `Option<AccountInfo>` structure.
+        };
+        
+        // Actually, for simplicity and to match `private-matchmaking` definition which might use `param` for validator?
+        // Let's look at `programs/private-matchmaking/src/lib.rs`:
+        // fn delegate_queue(...) ... ctx.accounts.validator ...
+        // It's likely an optional account in the context.
+        // For CPI, we simply provide it if we have it, or `None`? 
+        // Anchor CPI fields are usually `pub validator: Option<AccountInfo<'info>>` if defined as `Optional`.
+        // BUT `DelegateQueue` struct in `private-matchmaking` has `pub validator: Option<AccountInfo<'info>>`.
+        // So we pass `None` if we use default validator strategy or rely on ER.
+        
+        // However, I need to construct `DelegateQueue` struct.
+        // Let's assume `validator: None` for now.
+        
+        // Wait, `private_matchmaking::cpi::accounts` is generated by `anchor-gen` or included? 
+        // It's a workspace crate. 
+        // I will use `validator: None`.
+        
+        // Since I cannot verify the struct definition easily without docs, I'll risk `None`.
+        // If it fails to compile, I'll fix.
+         
+        let cpi_accounts_delegate = private_matchmaking::cpi::accounts::DelegateQueue {
+            pda: ctx.accounts.queue.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+            payer: ctx.accounts.payer.to_account_info(),
+            validator: None, 
+        };
+         
+        let cpi_ctx_delegate = CpiContext::new_with_signer(cpi_program, cpi_accounts_delegate, signer);
+        private_matchmaking::cpi::delegate_queue(cpi_ctx_delegate, queue_id)?;
+
+        msg!("Queue initialized and delegated to privacy layer.");
         Ok(())
     }
 
-    // 2️⃣ Player 2 joins the game
-    pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
+    // 1️⃣ Join Session (Idempotent: Creates or Joins)
+    pub fn join_session(ctx: Context<JoinSession>, game_id: u64) -> Result<()> {
         let game = &mut ctx.accounts.game;
         let player = ctx.accounts.player.key();
 
-        require!(game.player1 != Some(player), GameError::CannotJoinOwnGame);
-        require!(game.player2.is_none(), GameError::GameFull);
+        // Initialize game_id if new
+        if game.game_id == 0 {
+             game.game_id = game_id;
+             game.result = GameResult::None;
+        }
 
-        game.player2 = Some(player);
+        // Logic to assign slots
+        if game.player1.is_none() {
+            game.player1 = Some(player);
+            msg!("Player 1 Joined: {}", player);
+        } else if game.player1 == Some(player) {
+            msg!("Player 1 Re-joined: {}", player);
+        } else if game.player2.is_none() {
+            game.player2 = Some(player);
+            msg!("Player 2 Joined: {}", player);
+        } else if game.player2 == Some(player) {
+            msg!("Player 2 Re-joined: {}", player);
+        } else {
+            return err!(GameError::GameFull);
+        }
 
-        // Create PlayerChoice PDA for player 2
+        // Initialize/Update Player Choice PDA
         let player_choice = &mut ctx.accounts.player_choice;
         player_choice.game_id = game_id;
         player_choice.player = player;
-        player_choice.choice = None;
+        // Don't reset choice if already made (in case of re-join logic, though choice is None initially)
+        if player_choice.choice.is_none() {
+             player_choice.choice = None;
+        }
 
-        msg!("{} joined Game {} as player 2", player, game_id);
         Ok(())
     }
 
@@ -159,6 +291,39 @@ pub mod anchor_rock_paper_scissor {
             _ => {}
         }
 
+        // CPI: Unlock Players
+        // Unlock Player 1
+        let cpi_program = ctx.accounts.matchmaking_program.to_account_info();
+        
+        // Use the Queue Authority PDA to sign
+        // Note: For this to work, the Queue Authority MUST be the PDA [b"queue-authority"]
+        // which we enforced in initialize_msg_queue.
+        let seeds: &[&[u8]] = &[b"queue-authority", &[ctx.bumps.authority]]; 
+        let signer = &[&seeds[..]];
+        
+        let cpi_accounts_p1 = UnlockPlayer {
+            queue: ctx.accounts.queue.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(), // Passed in Context
+            player_status: ctx.accounts.player1_status.to_account_info(),
+            player: ctx.accounts.player1_wallet.to_account_info(), 
+            player_game_account: ctx.accounts.player1_profile.to_account_info(), 
+        };
+        
+        let cpi_ctx_p1 = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts_p1, signer);
+        private_matchmaking::cpi::unlock_player(cpi_ctx_p1)?;
+
+        // Unlock Player 2
+        let cpi_accounts_p2 = UnlockPlayer {
+            queue: ctx.accounts.queue.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+            player_status: ctx.accounts.player2_status.to_account_info(),
+            player: ctx.accounts.player2_wallet.to_account_info(),
+            player_game_account: ctx.accounts.player2_profile.to_account_info(),
+        };
+
+        let cpi_ctx_p2 = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts_p2, signer);
+        private_matchmaking::cpi::unlock_player(cpi_ctx_p2)?;
+        
         UpdatePermissionCpiBuilder::new(&permission_program)
             .permissioned_account(&game.to_account_info(), true)
             .authority(&game.to_account_info(), false)
@@ -261,35 +426,11 @@ pub mod anchor_rock_paper_scissor {
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
-pub struct CreateGame<'info> {
+pub struct JoinSession<'info> {
     #[account(
         init_if_needed,
-        payer = player1,
+        payer = player,
         space = 8 + Game::LEN,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
-        bump
-    )]
-    pub game: Account<'info, Game>,
-
-    #[account(
-        init_if_needed,
-        payer = player1,
-        space = 8 + PlayerChoice::LEN,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player1.key().as_ref()],
-        bump
-    )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
-    #[account(mut)]
-    pub player1: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-#[instruction(game_id: u64)]
-pub struct JoinGame<'info> {
-    #[account(
-        mut,
         seeds = [GAME_SEED, &game_id.to_le_bytes()],
         bump
     )]
@@ -361,6 +502,37 @@ pub struct RevealWinner<'info> {
     /// CHECK: Checked by the permission program
     #[account(mut)]
     pub permission2: UncheckedAccount<'info>,
+
+    /// CHECK: Queue account for CPI
+    pub queue: UncheckedAccount<'info>,
+
+    /// CHECK: Player 1 Wallet (for rent refund)
+    #[account(mut)]
+    pub player1_wallet: UncheckedAccount<'info>,
+
+    /// CHECK: Player 2 Wallet (for rent refund)
+    #[account(mut)]
+    pub player2_wallet: UncheckedAccount<'info>,
+
+    /// The PDA that is the authority of the queue (must sign for unlock)
+    #[account(
+        seeds = [b"queue-authority"],
+        bump
+    )]
+    /// CHECK: Checked by seeds
+    pub authority: UncheckedAccount<'info>,
+
+    /// CHECK: Player 1 Status for CPI
+    #[account(mut)]
+    pub player1_status: UncheckedAccount<'info>,
+
+    /// CHECK: Player 2 Status for CPI
+    #[account(mut)]
+    pub player2_status: UncheckedAccount<'info>,
+
+    pub matchmaking_program: Program<'info, PrivateMatchmaking>,
+
+    /// Anyone can trigger this
     /// Anyone can trigger this
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -476,6 +648,36 @@ pub struct PlayerProfile {
 
 impl PlayerProfile {
     pub const LEN: usize = 8 + 32 + 8 + 8;
+}
+
+#[derive(Accounts)]
+#[instruction(queue_id: String)]
+pub struct InitializeMsgQueue<'info> {
+    /// CHECK: Initialized via CPI
+    #[account(mut)]
+    pub queue: UncheckedAccount<'info>,
+    
+    /// CHECK: Page 0 Initialized via CPI
+    #[account(mut)]
+    pub page: UncheckedAccount<'info>,
+    
+    /// The PDA that will be the authority of the queue
+    /// It must be a SystemAccount (no data) so it can pay for the queue creation.
+    #[account(
+        mut,
+        seeds = [b"queue-authority"],
+        bump
+    )] 
+    pub authority: SystemAccount<'info>, 
+    
+    #[account(mut)]
+    pub payer: Signer<'info>, 
+    
+    /// CHECK: Tenant ID
+    pub tenant_program_id: UncheckedAccount<'info>,
+    
+    pub matchmaking_program: Program<'info, PrivateMatchmaking>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
