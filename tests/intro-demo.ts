@@ -113,6 +113,9 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
              })
              .rpc();
              console.log(`✅ Queue Initialized via CPI: ${queuePda.toBase58()} (ID: ${queueId})`);
+             const pageAccount = await provider.connection.getAccountInfo(pagePda);
+             console.log("DEBUG: Page Account Exists:", !!pageAccount);
+             if (pageAccount) console.log("DEBUG: Page Owner:", pageAccount.owner.toBase58());
         } catch (e) {
             console.error("Queue initialized failed", e);
             throw e;
@@ -369,14 +372,13 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         const p1ProfileBefore = await rpsProgram.account.playerProfile.fetch(player1Profile);
         const p2ProfileBefore = await rpsProgram.account.playerProfile.fetch(player2Profile);
 
-        console.log("🔑 Getting Auth Token for TEE (Just-in-Time)...");
+        console.log("🔑 Getting Auth Token for TEE (Using Player 1)...");
         if (!nacl || !nacl.sign) console.error("FATAL: Nacl not loaded properly");
-        const payerKey = (provider.wallet as any).payer?.secretKey;
         
         const token = await getAuthToken(
             EPHEMERAL_RPC_URL,
-            provider.wallet.publicKey,
-            (message: Uint8Array) => Promise.resolve(nacl.sign.detached(message, payerKey))
+            player1.publicKey,
+            (message: Uint8Array) => Promise.resolve(nacl.sign.detached(message, player1.secretKey))
         );
         console.log(`   Token generated (len=${token.token.length})`);
         
@@ -493,7 +495,26 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
 
         console.log("✅ All Permissions Created & Delegated");
 
-        // Helper to timeout TEE checks
+        // Helper to timeout TEE checks with Retry/Backoff for 403s
+        const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+        const retryWithBackoff = async <T>(
+            fn: () => Promise<T>,
+            retries: number = 5,
+            delay: number = 2000,
+            label: string
+        ): Promise<T> => {
+            try {
+                return await fn();
+            } catch (error) {
+                if (retries === 0) throw error;
+                // If it's a 403 or Timeout, retry
+                console.log(`   ⚠️ Retrying ${label} in ${delay}ms... (Error: ${error.message})`);
+                await wait(delay);
+                return retryWithBackoff(fn, retries - 1, delay * 2, label); // Exponential backoff
+            }
+        };
+
         const withTimeout = (promise: Promise<any>, ms: number, label: string) => 
             Promise.race([
                 promise,
@@ -501,18 +522,29 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
             ]);
 
         // Wait for permissions to propagate (Crucial step from Reference Baseline)
-        console.log("⏳ Waiting for permissions to trigger...");
+        console.log("⏳ Waiting for permissions to trigger (with Retry Policy)...");
         try {
-            const p1Active = await withTimeout(waitUntilPermissionActive(EPHEMERAL_RPC_URL, p1ChoicePda), 45000, "P1 Permission");
-            const p2Active = await withTimeout(waitUntilPermissionActive(EPHEMERAL_RPC_URL, p2ChoicePda), 45000, "P2 Permission");
-            const gameActive = await withTimeout(waitUntilPermissionActive(EPHEMERAL_RPC_URL, gamePda), 45000, "Game Permission");
+            // Note: We wrap the *polling* in a retry, or relying on `waitUntilPermissionActive`'s internal polling?
+            // `waitUntilPermissionActive` polls internally but throws if timeout/error?
+            // Actually, `waitUntilPermissionActive` might just return false.
+            // Let's wrap the *invocation* in retry incase of RPC 403s on immediate call.
+            
+            const checkP1 = () => withTimeout(waitUntilPermissionActive(EPHEMERAL_RPC_URL, p1ChoicePda), 60000, "P1 Permission");
+            const checkP2 = () => withTimeout(waitUntilPermissionActive(EPHEMERAL_RPC_URL, p2ChoicePda), 60000, "P2 Permission");
+            const checkGame = () => withTimeout(waitUntilPermissionActive(EPHEMERAL_RPC_URL, gamePda), 60000, "Game Permission");
+
+            const [p1Active, p2Active, gameActive] = await Promise.all([
+                retryWithBackoff(checkP1, 5, 5000, "P1 Active Check"),
+                retryWithBackoff(checkP2, 5, 5000, "P2 Active Check"),
+                retryWithBackoff(checkGame, 5, 5000, "Game Active Check")
+            ]);
             
             if (!p1Active || !p2Active || !gameActive) {
                 throw new Error(`Permissions not active: P1=${p1Active}, P2=${p2Active}, Game=${gameActive}`);
             }
             console.log("✅ Permissions Active on TEE");
         } catch (e) {
-            console.error("❌ Permission Wait Failed (Check TEE RPC):", e);
+            console.error("❌ Permission Wait Failed (Check TEE RPC/Rate Limit):", e);
             throw e;
         }
 

@@ -165,51 +165,9 @@ pub mod anchor_rock_paper_scissor {
 
     // --- Core Game Logic (From Baseline, Fixed) ---
 
-    // 1️⃣ Create and auto-join as Player 1
-    pub fn create_game(ctx: Context<CreateGame>, game_id: u64) -> Result<()> {
-        let game = &mut ctx.accounts.game;
-        let player1 = ctx.accounts.player1.key();
+    // --- Legacy Instructions Removed (replaced by join_session) ---
 
-        game.game_id = game_id;
-        game.player1 = Some(player1);
-        game.player2 = None;
-        game.result = GameResult::None;
-
-        msg!("Game ID: {}", game_id);
-        msg!("Player 1 PDA: {}", player1);
-
-        // initialize PlayerChoice for player 1
-        let player_choice = &mut ctx.accounts.player_choice;
-        player_choice.game_id = game_id;
-        player_choice.player = player1;
-        player_choice.choice = None;
-
-        msg!("Game {} created and joined by {}", game_id, player1);
-
-        Ok(())
-    }
-
-    // 2️⃣ Player 2 joins the game
-    pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
-        let game = &mut ctx.accounts.game;
-        let player = ctx.accounts.player.key();
-
-        require!(game.player1 != Some(player), GameError::CannotJoinOwnGame);
-        require!(game.player2.is_none(), GameError::GameFull);
-
-        game.player2 = Some(player);
-
-        // Create PlayerChoice PDA for player 2
-        let player_choice = &mut ctx.accounts.player_choice;
-        player_choice.game_id = game_id;
-        player_choice.player = player;
-        player_choice.choice = None;
-
-        msg!("{} joined Game {} as player 2", player, game_id);
-        Ok(())
-    }
-
-    // 3️⃣ Player makes a choice
+    // 3️⃣ Player makes a choice (Kept for Intro Demo)
     pub fn make_choice(ctx: Context<MakeChoice>, _game_id: u64, choice: Choice) -> Result<()> {
         let player_choice = &mut ctx.accounts.player_choice;
         require!(player_choice.choice.is_none(), GameError::AlreadyChose);
@@ -378,55 +336,7 @@ pub mod anchor_rock_paper_scissor {
 
 // --- Accounts Structs ---
 
-#[derive(Accounts)]
-#[instruction(game_id: u64)]
-pub struct CreateGame<'info> {
-    #[account(
-        init_if_needed,
-        payer = player1,
-        space = 8 + Game::LEN,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
-        bump
-    )]
-    pub game: Account<'info, Game>,
-
-    #[account(
-        init_if_needed,
-        payer = player1,
-        space = 8 + PlayerChoice::LEN,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player1.key().as_ref()],
-        bump
-    )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
-    #[account(mut)]
-    pub player1: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-#[instruction(game_id: u64)]
-pub struct JoinGame<'info> {
-    #[account(
-        mut,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
-        bump
-    )]
-    pub game: Account<'info, Game>,
-
-    #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + PlayerChoice::LEN,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player.key().as_ref()],
-        bump
-    )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
-    #[account(mut)]
-    pub player: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
+// --- Legacy Structs Removed ---
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -543,6 +453,7 @@ pub struct InitializeMsgQueue<'info> {
     // The original code used CPI to initialize.
     // Let's verify context.
     #[account(
+        mut,
         seeds = [b"queue-authority"],
         bump
     )]
