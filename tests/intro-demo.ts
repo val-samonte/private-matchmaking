@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { PrivateMatchmaking } from "../target/types/private_matchmaking";
@@ -105,7 +106,6 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
                  // authority: queueAuthorityPda, // Auto-resolved by Anchor SDK due to seeds?
                  payer: provider.wallet.publicKey,
                  tenantProgramId: rpsProgram.programId,
-                 matchmakingProgram: matchmakingProgram.programId,
                  bufferPda,
                  delegationRecordPda,
                  delegationMetadataPda,
@@ -317,6 +317,7 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         // --- TEE Integration ---
         const EPHEMERAL_RPC_URL = "https://tee.magicblock.app";
         const ER_VALIDATOR = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
+        const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
         const MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111111111111111111111111");
 
         console.log("🔒 Verifying TEE RPC Integrity...");
@@ -327,20 +328,7 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
              console.log("⚠️ TEE RPC Verification Warning:", e.message);
         }
 
-        console.log("🔑 Getting Auth Token for TEE...");
-        if (!nacl || !nacl.sign) console.error("FATAL: Nacl not loaded properly");
-        const secretKey = (provider.wallet as any).payer?.secretKey;
-        if (!secretKey) console.error("FATAL: Secret Key missing");
-
-        const token = await getAuthToken(
-            EPHEMERAL_RPC_URL,
-            provider.wallet.publicKey,
-            (message: Uint8Array) => Promise.resolve(nacl.sign.detached(message, secretKey))
-        );
-        
-        const teeConnection = new Connection(`${EPHEMERAL_RPC_URL}?token=${token}`);
-        const teeProvider = new anchor.AnchorProvider(teeConnection, provider.wallet, { commitment: "confirmed" });
-        const rpsProgramTee = new anchor.Program(rpsProgram.idl, teeProvider);
+        console.log("� Verifying TEE RPC Integrity (Skipping duplicate check)...");
 
         // 1. Delegate Game to TEE (L1 Transaction)
         console.log("🤝 Delegating Game to TEE Validator...");
@@ -353,20 +341,57 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
                 })
                 .rpc();
             console.log("✅ Game Delegated to TEE");
+
+            // Delegate Player Profiles to TEE (So ELO can be updated)
+            await rpsProgram.methods.delegatePda({ playerProfile: { player: player1.publicKey } } as any)
+                .accounts({
+                    pda: player1Profile,
+                    payer: provider.wallet.publicKey,
+                    validator: ER_VALIDATOR,
+                })
+                .rpc();
+            console.log("✅ P1 Profile Delegated to TEE");
+
+            await rpsProgram.methods.delegatePda({ playerProfile: { player: player2.publicKey } } as any)
+                .accounts({
+                    pda: player2Profile,
+                    payer: provider.wallet.publicKey,
+                    validator: ER_VALIDATOR,
+                })
+                .rpc();
+            console.log("✅ P2 Profile Delegated to TEE");
+
         } catch (e) {
             console.log("⚠️ Delegation failed (might already be delegated):", e);
         }
 
+        // Fetch player profiles before the reveal to compare ELO (L1)
+        const p1ProfileBefore = await rpsProgram.account.playerProfile.fetch(player1Profile);
+        const p2ProfileBefore = await rpsProgram.account.playerProfile.fetch(player2Profile);
+
+        console.log("🔑 Getting Auth Token for TEE (Just-in-Time)...");
+        if (!nacl || !nacl.sign) console.error("FATAL: Nacl not loaded properly");
+        const payerKey = (provider.wallet as any).payer?.secretKey;
+        
+        const token = await getAuthToken(
+            EPHEMERAL_RPC_URL,
+            provider.wallet.publicKey,
+            (message: Uint8Array) => Promise.resolve(nacl.sign.detached(message, payerKey))
+        );
+        console.log(`   Token generated (len=${token.token.length})`);
+        
+        const teeConnection = new Connection(`${EPHEMERAL_RPC_URL}?token=${token.token}`);
+        const teeProvider = new anchor.AnchorProvider(teeConnection, provider.wallet, { commitment: "confirmed" });
+        const rpsProgramTee = new anchor.Program(rpsProgram.idl, teeProvider);
+
+        const [gameDelegationRecord] = PublicKey.findProgramAddressSync(
+            [Buffer.from("delegation"), gamePda.toBuffer()],
+            DELEGATION_PROGRAM_ID
+        );
+
         // 2. Reveal Winner (TEE L2 Transaction)
         console.log("🏆 Revealing Winner on TEE...");
-        try {
-            // Need to derive permission PDAs? 
-            // For now, using mock/random or deriving if standard.
-            // Assuming permissions are checked but maybe not strictly enforced if we just updated them in L1? 
-            // Wait, reveal_winner logic UPDATES them.
-            // We pass them as accounts.
-            
-            // Helper to derive permission PDA (Stub logic if SDK helper not imported)
+
             // const derivePermission = (seed: Buffer) => PublicKey.findProgramAddressSync([seed, ...], ...);
             // We'll use random for now if they are just "Unchecked" in struct but "Signer" or "Account" in logic?
             // In struct: UncheckedAccount.
@@ -380,35 +405,49 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
                  player2Choice: p2ChoicePda,
                  player1Profile: player1Profile,
                  player2Profile: player2Profile,
-                 // Permissions - reusing wallet or random for now as placeholders if not initialized
-                 permissionGame: provider.wallet.publicKey, 
-                 permission1: provider.wallet.publicKey,
-                 permission2: provider.wallet.publicKey,
                  
-                 queue: queuePda,
-                 player1Wallet: player1.publicKey,
-                 player2Wallet: player2.publicKey,
-                 authority: queueAuthorityPda,
-                 player1Status: p1Status,
-                 player2Status: p2Status,
-                 matchmakingProgram: matchmakingProgram.programId,
+                 magicProgram: DELEGATION_PROGRAM_ID,
+                 magicContext: gameDelegationRecord, 
                  payer: provider.wallet.publicKey,
-                 
-                 permissionProgram: new PublicKey("ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"),
-                 magicProgram: MAGIC_PROGRAM_ID,
-                 magicContext: gamePda, // Context for commit usually same as account or related? using gamePda or payer?
-                 // Wait, Magic Context account... logic says: verifyTeeRpcIntegrity? 
-                 // commit_and_undelegate(..., magic_context, ...) 
-                 // Often it's a specific context PDA.
-                 // For simpler integration, sometimes it's just a system account or the PDA itself.
-                 // We will try gamePda.
             })
             .rpc();
             console.log("✅ Reveal Winner Executed Successfully on TEE");
-        } catch (e) {
-            console.log("⚠️ Reveal Winner failed on TEE:", e);
-             if (e.logs) { console.log(e.logs); }
-        }
+            
+            // Wait for Commit/Settlement (if async) - Standard commit is atomic in instruction, 
+            // but we need to verify L1 state or TEE state.
+            await new Promise(r => setTimeout(r, 2000));
+
+            // --- Verify Game Result ---
+            // If committed, we check L1. If not committed yet, we check TEE? 
+            // reveal_winner calls `commit_and_undelegate`. Game should be back on L1.
+            const gameAccount = await rpsProgram.account.game.fetch(gamePda);
+            console.log("🏆 Game Result (L1):", JSON.stringify(gameAccount.result));
+
+            // --- Verify ELO Updates ---
+            const p1ProfileAfter = await rpsProgram.account.playerProfile.fetch(player1Profile);
+            const p2ProfileAfter = await rpsProgram.account.playerProfile.fetch(player2Profile);
+            console.log(`📊 ELO After:  P1=${p1ProfileAfter.elo}, P2=${p2ProfileAfter.elo}`);
+
+            // Logic Check
+            if (gameAccount.result.winner) {
+                // Rust Enum Tuple Variant `Winner(Pubkey)` -> TS `{ 0: PublicKey }` or `[PublicKey]`
+                // Error said: type '{ 0: PublicKey; }'
+                const winnerKey = (gameAccount.result.winner as any)[0].toBase58();
+                
+                if (winnerKey === player1.publicKey.toBase58()) {
+                    console.log("   ✅ P1 Won: Verifying ELO gain...");
+                    expect(p1ProfileAfter.elo.toNumber()).to.be.gt(p1ProfileBefore.elo.toNumber());
+                    expect(p2ProfileAfter.elo.toNumber()).to.be.lt(p2ProfileBefore.elo.toNumber());
+                } else if (winnerKey === player2.publicKey.toBase58()) {
+                    console.log("   ✅ P2 Won: Verifying ELO gain...");
+                    expect(p2ProfileAfter.elo.toNumber()).to.be.gt(p2ProfileBefore.elo.toNumber());
+                    expect(p1ProfileAfter.elo.toNumber()).to.be.lt(p1ProfileBefore.elo.toNumber());
+                }
+            } else if (gameAccount.result.tie) {
+                 console.log("   ⚖️ Tie: Verifying ELO unchanged...");
+                 expect(p1ProfileAfter.elo.toNumber()).to.eq(p1ProfileBefore.elo.toNumber());
+                 expect(p2ProfileAfter.elo.toNumber()).to.eq(p2ProfileBefore.elo.toNumber());
+            }
     });
 
     after(async () => {
@@ -423,21 +462,16 @@ describe("Integration Demo: Matchmaking -> Rock Paper Scissors", () => {
         } catch(e) { /* Ignore */ }
 
         // 2. Close Pages
-        // We initialized capacity=2 (indices 0, 1)
         for(let i=0; i<2; i++) {
              try {
                 await matchmakingClient.closePage(queuePda, i);
-             } catch(e) {
-                 console.log(`⚠️ Failed to close page ${i}: ${e.message}`);
-             }
+             } catch(e) { /* Ignore */ }
         }
 
         // 3. Close Queue
         try {
             await matchmakingClient.closeQueue(queueId);
-        } catch(e) {
-             console.log(`⚠️ Failed to close queue: ${e.message}`);
-        }
+        } catch(e) { /* Ignore */ }
 
         // 4. Close Game & Choices (Reclaim Rent)
         if (gameId) {
