@@ -10,8 +10,8 @@ private_matchmaking = "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"
 anchor_rock_paper_scissor = "8dwsz5RRGiMd3E8wCyXNYimoQR8ovKdBb4yxVfGcoYsG"
 
 [programs.devnet]
-private_matchmaking = "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"
-anchor_rock_paper_scissor = "8dwsz5RRGiMd3E8wCyXNYimoQR8ovKdBb4yxVfGcoYsG"
+# private_matchmaking = "DdBj92msRBH5yC22AjbBo86AdvAJSTFvCXU4nAf2mGZm"
+anchor_rock_paper_scissor = "FX4Jrfctiuwkd11syfSswPUFJjnL5J4VzsK42yPe5h7y"
 
 [registry]
 url = "https://api.apr.dev"
@@ -21,7 +21,7 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "npx ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
+test = "npx ts-mocha -p ./tsconfig.json -t 120000 \"tests/**/*.ts\""
 
 [test]
 startup_wait = 5000
