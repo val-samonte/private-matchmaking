@@ -9,7 +9,7 @@ use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
-declare_id!("xc7RtasEqM2YNaRSiFfiMGKrHM6EjbbcGLK4b2fzjhb");
+declare_id!("2GTfaH7ZeZ29SubUzbUyKqQAucNLeNhkRhXUZA8bUyLs");
 
 pub const PLAYER_CHOICE_SEED: &[u8] = b"player_choice";
 pub const GAME_SEED: &[u8] = b"game";
@@ -101,14 +101,12 @@ pub mod anchor_rock_paper_scissor {
         let permission1 = &ctx.accounts.permission1.to_account_info();
         let permission2 = &ctx.accounts.permission2.to_account_info();
         let magic_program = &ctx.accounts.magic_program.to_account_info();
-        let magic_program = &ctx.accounts.magic_program.to_account_info();
+        let _magic_program = &ctx.accounts.magic_program.to_account_info();
         let magic_context = &ctx.accounts.magic_context.to_account_info();
-        let mut player1_profile = PlayerProfile::try_deserialize(
-            &mut ctx.accounts.player1_profile.data.borrow().as_ref(),
-        )?;
-        let mut player2_profile = PlayerProfile::try_deserialize(
-            &mut ctx.accounts.player2_profile.data.borrow().as_ref(),
-        )?;
+        let mut player1_profile =
+            PlayerProfile::try_deserialize(&mut &**ctx.accounts.player1_profile.data.borrow())?;
+        let mut player2_profile =
+            PlayerProfile::try_deserialize(&mut &**ctx.accounts.player2_profile.data.borrow())?;
 
         // 1️⃣ Clone choices into game
         game.player1_choice = player1_choice.choice.clone().into();
@@ -177,23 +175,7 @@ pub mod anchor_rock_paper_scissor {
             _ => {}
         }
 
-        // Write Data (try_serialize includes discriminator)
-        player1_profile.try_serialize(
-            &mut *ctx
-                .accounts
-                .player1_profile
-                .to_account_info()
-                .data
-                .borrow_mut(),
-        )?;
-        player2_profile.try_serialize(
-            &mut *ctx
-                .accounts
-                .player2_profile
-                .to_account_info()
-                .data
-                .borrow_mut(),
-        )?;
+        // Write Data (skip first 8 bytes to preserve discriminator)
 
         UpdatePermissionCpiBuilder::new(&permission_program)
             .permissioned_account(&game.to_account_info(), true)
@@ -201,6 +183,12 @@ pub mod anchor_rock_paper_scissor {
             .permission(&permission_game.to_account_info())
             .args(MembersArgs { members: None })
             .invoke_signed(&[&[GAME_SEED, &game.game_id.to_le_bytes(), &[ctx.bumps.game]]])?;
+
+        msg!("TEE_LOG: Player 1 ELO Calculated: {}", player1_profile.elo);
+        msg!("TEE_LOG: Player 2 ELO Calculated: {}", player2_profile.elo);
+
+        msg!("TEE_LOG: Player 1 ELO Calculated: {}", player1_profile.elo);
+        msg!("TEE_LOG: Player 2 ELO Calculated: {}", player2_profile.elo);
 
         UpdatePermissionCpiBuilder::new(&permission_program)
             .permissioned_account(&player1_choice.to_account_info(), true)
@@ -226,6 +214,20 @@ pub mod anchor_rock_paper_scissor {
                 &[ctx.bumps.player2_choice],
             ]])?;
 
+        // Write Data (overwrite entire buffer including discriminator)
+        {
+            let mut data = ctx.accounts.player1_profile.data.borrow_mut();
+            let mut cursor = &mut data[..];
+            player1_profile.try_serialize(&mut cursor)?;
+            // Debug: Modify lamports to verify write access
+            **ctx.accounts.player1_profile.lamports.borrow_mut() -= 1000;
+        }
+        {
+            let mut data = ctx.accounts.player2_profile.data.borrow_mut();
+            let mut cursor = &mut data[..];
+            player2_profile.try_serialize(&mut cursor)?;
+        }
+
         msg!("Result: {:?}", &game.result);
 
         game.exit(&crate::ID)?;
@@ -234,8 +236,7 @@ pub mod anchor_rock_paper_scissor {
             &ctx.accounts.payer,
             vec![
                 &game.to_account_info(),
-                &ctx.accounts.player1_profile.to_account_info(),
-                &ctx.accounts.player2_profile.to_account_info(),
+                // Profiles excluded to verify local TEE persistence and write access
             ],
             magic_context,
             magic_program,
@@ -304,7 +305,7 @@ pub struct InitializePlayer<'info> {
     #[account(
         init,
         payer = payer,
-        space = PlayerProfile::LEN,
+        space = 8 + PlayerProfile::LEN,
         seeds = [PLAYER_PROFILE_SEED, payer.key().as_ref()],
         bump
     )]

@@ -596,6 +596,9 @@ describe("anchor-rock-paper-scissor", () => {
                 const p1Profile = await program.account.playerProfile.fetch(player1ProfilePda);
                 const p2Profile = await program.account.playerProfile.fetch(player2ProfilePda);
                 console.log("Player 1 ELO:", p1Profile.elo.toString());
+                console.log("Player 1 Games Played:", p1Profile.gamesPlayed.toString());
+                console.log("Player 1 Lamports:", (await program.provider.connection.getAccountInfo(player1ProfilePda)).lamports);
+                console.log("Player 2 Games Played:", p2Profile.gamesPlayed.toString());
                 console.log("Player 2 ELO:", p2Profile.elo.toString());
             });
         });

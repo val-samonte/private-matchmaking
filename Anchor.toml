@@ -3,7 +3,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-anchor_rock_paper_scissor = "xc7RtasEqM2YNaRSiFfiMGKrHM6EjbbcGLK4b2fzjhb"
+anchor_rock_paper_scissor = "2GTfaH7ZeZ29SubUzbUyKqQAucNLeNhkRhXUZA8bUyLs"
 
 [programs.localnet]
 anchor_rock_paper_scissor = "xc7RtasEqM2YNaRSiFfiMGKrHM6EjbbcGLK4b2fzjhb"
