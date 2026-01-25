@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+
 use ephemeral_rollups_sdk::access_control::instructions::{
     CreatePermissionCpiBuilder, UpdatePermissionCpiBuilder,
 };
@@ -8,7 +9,7 @@ use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
-declare_id!("FX4Jrfctiuwkd11syfSswPUFJjnL5J4VzsK42yPe5h7y");
+declare_id!("xc7RtasEqM2YNaRSiFfiMGKrHM6EjbbcGLK4b2fzjhb");
 
 pub const PLAYER_CHOICE_SEED: &[u8] = b"player_choice";
 pub const GAME_SEED: &[u8] = b"game";
@@ -20,154 +21,62 @@ pub mod anchor_rock_paper_scissor {
 
     use super::*;
 
-    // --- Matchmaking Features (Restored) ---
-
-    // 0️⃣ Initialize Player Profile (for Matchmaking)
-    pub fn initialize_player(ctx: Context<InitializePlayer>, elo: u64) -> Result<()> {
-        let player_profile = &mut ctx.accounts.player_profile;
-        player_profile.authority = ctx.accounts.payer.key();
-        player_profile.elo = elo;
-        player_profile.wins = 0;
-        player_profile.losses = 0;
-        msg!("Player initialized with ELO: {}", elo);
+    // 0️⃣ Initialize Player Profile (L1)
+    pub fn initialize_player(ctx: Context<InitializePlayer>) -> Result<()> {
+        let profile = &mut ctx.accounts.profile;
+        profile.player = ctx.accounts.payer.key();
+        profile.elo = 1000;
+        profile.games_played = 0;
+        profile.games_won = 0;
+        msg!("Initialized profile for {}", profile.player);
         Ok(())
     }
 
-    // 0.5️⃣ Initialize Matchmaking Queue (Prod: Owned by this Program)
-    pub fn initialize_msg_queue(
-        ctx: Context<InitializeMsgQueue>,
-        queue_id: String,
-        capacity: u16,
-        page_size: u8,
-    ) -> Result<()> {
-        // Fund the PDA Authority so it can pay for the Queue Account.
-        let rent_exempt =
-            Rent::get()?.minimum_balance(private_matchmaking::state::queue::QueueHead::LEN);
-        let amount = rent_exempt + 10_000_000;
+    // 1️⃣ Create and auto-join as Player 1
+    pub fn create_game(ctx: Context<CreateGame>, game_id: u64) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        let player1 = ctx.accounts.player1.key();
 
-        let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
-            &ctx.accounts.payer.key(),
-            &ctx.accounts.authority.key(),
-            amount,
-        );
-        anchor_lang::solana_program::program::invoke(
-            &transfer_ix,
-            &[
-                ctx.accounts.payer.to_account_info(),
-                ctx.accounts.authority.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-        )?;
+        game.game_id = game_id;
+        game.player1 = Some(player1);
+        game.player2 = None;
+        game.result = GameResult::None;
 
-        let cpi_program = ctx.accounts.matchmaking_program.to_account_info();
+        msg!("Game ID: {}", game_id);
+        msg!("Player 1 PDA: {}", player1);
 
-        let config = private_matchmaking::state::queue::QueueConfig {
-            // Matchable Interface: No offset/type needed
-            match_threshold: 1000,
-            search_window: 60,
-            reserved: [0; 64],
-        };
+        // initialize PlayerChoice for player 1
+        let player_choice = &mut ctx.accounts.player_choice;
+        player_choice.game_id = game_id;
+        player_choice.player = player1;
+        player_choice.choice = None;
 
-        // Seeds for authorization
-        let seeds: &[&[u8]] = &[b"queue-authority", &[ctx.bumps.authority]];
-        let signer = &[&seeds[..]];
+        msg!("Game {} created and joined by {}", game_id, player1);
 
-        let cpi_accounts = private_matchmaking::cpi::accounts::InitializeQueue {
-            queue: ctx.accounts.queue.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-            tenant_program_id: ctx.accounts.tenant_program_id.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-        };
-
-        let cpi_ctx = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts, signer);
-
-        private_matchmaking::cpi::initialize_queue(
-            cpi_ctx,
-            queue_id.clone(),
-            config,
-            capacity,
-            page_size,
-        )?;
-
-        // 2️⃣ Initialize Page 0
-        let cpi_accounts_page = private_matchmaking::cpi::accounts::InitializePage {
-            queue: ctx.accounts.queue.to_account_info(),
-            page: ctx.accounts.page.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-        };
-        let cpi_ctx_page =
-            CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts_page, signer);
-
-        private_matchmaking::cpi::initialize_page(cpi_ctx_page, 0)?;
-
-        let cpi_accounts_delegate = private_matchmaking::cpi::accounts::DelegateQueue {
-            pda: ctx.accounts.queue.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-            payer: ctx.accounts.payer.to_account_info(),
-            validator: Some(ctx.accounts.system_program.to_account_info()),
-            buffer_pda: ctx.accounts.buffer_pda.to_account_info(),
-            delegation_record_pda: ctx.accounts.delegation_record_pda.to_account_info(),
-            delegation_metadata_pda: ctx.accounts.delegation_metadata_pda.to_account_info(),
-            delegation_program: ctx.accounts.delegation_program.to_account_info(),
-            owner_program: ctx.accounts.matchmaking_program.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-        };
-
-        let cpi_ctx_delegate =
-            CpiContext::new_with_signer(cpi_program, cpi_accounts_delegate, signer);
-        private_matchmaking::cpi::delegate_queue(cpi_ctx_delegate, queue_id)?;
-
-        msg!("Queue initialized and delegated to privacy layer.");
         Ok(())
     }
 
-    // 1️⃣ Join Session (Idempotent: Creates or Joins)
-    pub fn join_session(ctx: Context<JoinSession>, game_id: u64) -> Result<()> {
+    // 2️⃣ Player 2 joins the game
+    pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
         let game = &mut ctx.accounts.game;
         let player = ctx.accounts.player.key();
 
-        // Initialize game_id if new
-        if game.game_id == 0 {
-            game.game_id = game_id;
-            game.result = GameResult::None;
-        }
+        require!(game.player1 != Some(player), GameError::CannotJoinOwnGame);
+        require!(game.player2.is_none(), GameError::GameFull);
 
-        // Logic to assign slots
-        if game.player1.is_none() {
-            game.player1 = Some(player);
-        } else if game.player1 == Some(player) {
-            // Re-join logic
-        } else if game.player2.is_none() {
-            game.player2 = Some(player);
-        } else if game.player2 == Some(player) {
-            // Re-join logic
-        } else {
-            return err!(GameError::GameFull);
-        }
+        game.player2 = Some(player);
 
-        // Initialize/Update Player Choice PDA
+        // Create PlayerChoice PDA for player 2
         let player_choice = &mut ctx.accounts.player_choice;
         player_choice.game_id = game_id;
         player_choice.player = player;
-        if player_choice.choice.is_none() {
-            player_choice.choice = None;
-        }
+        player_choice.choice = None;
 
+        msg!("{} joined Game {} as player 2", player, game_id);
         Ok(())
     }
 
-    // 7.2 Matchable Interface: Get Player ELO (Public/CPI)
-    pub fn get_player_elo(ctx: Context<GetPlayerElo>) -> Result<u64> {
-        let profile = &ctx.accounts.player_profile;
-        Ok(profile.elo)
-    }
-
-    // --- Core Game Logic (From Baseline, Fixed) ---
-
-    // --- Legacy Instructions Removed (replaced by join_session) ---
-
-    // 3️⃣ Player makes a choice (Kept for Intro Demo)
+    // 3️⃣ Player makes a choice
     pub fn make_choice(ctx: Context<MakeChoice>, _game_id: u64, choice: Choice) -> Result<()> {
         let player_choice = &mut ctx.accounts.player_choice;
         require!(player_choice.choice.is_none(), GameError::AlreadyChose);
@@ -182,7 +91,7 @@ pub mod anchor_rock_paper_scissor {
         Ok(())
     }
 
-    // 4️⃣ Reveal and record the winner (FIXED: Uses UpdatePermission + Commit)
+    // 4️⃣ Reveal and record the winner
     pub fn reveal_winner(ctx: Context<RevealWinner>) -> Result<()> {
         let game = &mut ctx.accounts.game;
         let player1_choice = &ctx.accounts.player1_choice;
@@ -191,6 +100,15 @@ pub mod anchor_rock_paper_scissor {
         let permission_game = &ctx.accounts.permission_game.to_account_info();
         let permission1 = &ctx.accounts.permission1.to_account_info();
         let permission2 = &ctx.accounts.permission2.to_account_info();
+        let magic_program = &ctx.accounts.magic_program.to_account_info();
+        let magic_program = &ctx.accounts.magic_program.to_account_info();
+        let magic_context = &ctx.accounts.magic_context.to_account_info();
+        let mut player1_profile = PlayerProfile::try_deserialize(
+            &mut ctx.accounts.player1_profile.data.borrow().as_ref(),
+        )?;
+        let mut player2_profile = PlayerProfile::try_deserialize(
+            &mut ctx.accounts.player2_profile.data.borrow().as_ref(),
+        )?;
 
         // 1️⃣ Clone choices into game
         game.player1_choice = player1_choice.choice.clone().into();
@@ -222,6 +140,60 @@ pub mod anchor_rock_paper_scissor {
 
             _ => GameResult::Tie,
         };
+
+        // 5️⃣ Update ELO and Stats
+        match &game.result {
+            GameResult::Winner(winner) => {
+                if *winner == player1 {
+                    player1_profile.elo = player1_profile.elo.checked_add(32).unwrap_or(u64::MAX);
+                    player1_profile.games_won =
+                        player1_profile.games_won.checked_add(1).unwrap_or(u64::MAX);
+                    player2_profile.elo = player2_profile.elo.saturating_sub(32);
+                } else {
+                    player2_profile.elo = player2_profile.elo.checked_add(32).unwrap_or(u64::MAX);
+                    player2_profile.games_won =
+                        player2_profile.games_won.checked_add(1).unwrap_or(u64::MAX);
+                    player1_profile.elo = player1_profile.elo.saturating_sub(32);
+                }
+                player1_profile.games_played = player1_profile
+                    .games_played
+                    .checked_add(1)
+                    .unwrap_or(u64::MAX);
+                player2_profile.games_played = player2_profile
+                    .games_played
+                    .checked_add(1)
+                    .unwrap_or(u64::MAX);
+            }
+            GameResult::Tie => {
+                player1_profile.games_played = player1_profile
+                    .games_played
+                    .checked_add(1)
+                    .unwrap_or(u64::MAX);
+                player2_profile.games_played = player2_profile
+                    .games_played
+                    .checked_add(1)
+                    .unwrap_or(u64::MAX);
+            }
+            _ => {}
+        }
+
+        // Write Data (try_serialize includes discriminator)
+        player1_profile.try_serialize(
+            &mut *ctx
+                .accounts
+                .player1_profile
+                .to_account_info()
+                .data
+                .borrow_mut(),
+        )?;
+        player2_profile.try_serialize(
+            &mut *ctx
+                .accounts
+                .player2_profile
+                .to_account_info()
+                .data
+                .borrow_mut(),
+        )?;
 
         UpdatePermissionCpiBuilder::new(&permission_program)
             .permissioned_account(&game.to_account_info(), true)
@@ -258,32 +230,24 @@ pub mod anchor_rock_paper_scissor {
 
         game.exit(&crate::ID)?;
 
-        // Note: Implicitly handled commit by macro logic not needing manual commit call if #[commit] is used,
-        // BUT Baseline uses explicit commit_and_undelegate logic so we keep it.
-        // Wait, Baseline uses implicit accounts injection but explicit CPI.
-        // Actually, the macro typically injects the magic context.
-        // Let's use `commit_and_undelegate_accounts` but get context from hidden accounts if possible?
-        // Ah, `ctx.accounts.magic_context` is NOT available if we removed it from struct.
-        // Baseline `lib.rs` (Step 2314/2322) did NOT have `magic_context` in `RevealWinner` struct but logic used it?
-        // Let's re-check Baseline code logic for `magic_context`.
-        // Step 2314 showed: `commit_and_undelegate_accounts(..., magic_context, magic_program)?`
-        // AND `pub magic_context: UncheckedAccount<'info>` WAS in the struct (lines 90-91).
-        // My "Fix" in Step 2454 REMOVED it.
-        // If I remove it, I can't pass it to the function.
-        // BUT the macro might handle it.
-        // THE BASELINE CHECK PASSED WITHOUT ME ADDING `magic_context`?
-        // Wait, I ran the "Nuclear Option" in 2562 which COPIED the Baseline `lib.rs`.
-        // If the Baseline `lib.rs` has `magic_context` in the Struct, then my previous analysis that it *shouldn't* be there was WRONG.
-        // The Baseline `lib.rs` MUST have had those accounts.
-        // Let's assume I need to restore them if I want to call `commit_and_undelegate_accounts`.
+        commit_and_undelegate_accounts(
+            &ctx.accounts.payer,
+            vec![
+                &game.to_account_info(),
+                &ctx.accounts.player1_profile.to_account_info(),
+                &ctx.accounts.player2_profile.to_account_info(),
+            ],
+            magic_context,
+            magic_program,
+        )?;
 
         Ok(())
     }
 
     /// Delegate account to the delegation program based on account type
+    /// Set specific validator based on ER, see https://docs.magicblock.gg/pages/get-started/how-integrate-your-program/local-setup
     pub fn delegate_pda(ctx: Context<DelegatePda>, account_type: AccountType) -> Result<()> {
         let seed_data = derive_seeds_from_account_type(&account_type);
-        // Fixed: No manual bump derivation
         let seeds_refs: Vec<&[u8]> = seed_data.iter().map(|s| s.as_slice()).collect();
 
         let validator = ctx.accounts.validator.as_ref().map(|v| v.key());
@@ -299,6 +263,7 @@ pub mod anchor_rock_paper_scissor {
     }
 
     /// Creates a permission based on account type input.
+    /// Derives the bump from the account type and seeds, then calls the permission program.
     pub fn create_permission(
         ctx: Context<CreatePermission>,
         account_type: AccountType,
@@ -334,9 +299,70 @@ pub mod anchor_rock_paper_scissor {
     }
 }
 
-// --- Accounts Structs ---
+#[derive(Accounts)]
+pub struct InitializePlayer<'info> {
+    #[account(
+        init,
+        payer = payer,
+        space = PlayerProfile::LEN,
+        seeds = [PLAYER_PROFILE_SEED, payer.key().as_ref()],
+        bump
+    )]
+    pub profile: Account<'info, PlayerProfile>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
 
-// --- Legacy Structs Removed ---
+#[derive(Accounts)]
+#[instruction(game_id: u64)]
+pub struct CreateGame<'info> {
+    #[account(
+        init_if_needed,
+        payer = player1,
+        space = 8 + Game::LEN,
+        seeds = [GAME_SEED, &game_id.to_le_bytes()],
+        bump
+    )]
+    pub game: Account<'info, Game>,
+
+    #[account(
+        init_if_needed,
+        payer = player1,
+        space = 8 + PlayerChoice::LEN,
+        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player1.key().as_ref()],
+        bump
+    )]
+    pub player_choice: Account<'info, PlayerChoice>,
+
+    #[account(mut)]
+    pub player1: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(game_id: u64)]
+pub struct JoinGame<'info> {
+    #[account(
+        mut,
+        seeds = [GAME_SEED, &game_id.to_le_bytes()],
+        bump
+    )]
+    pub game: Account<'info, Game>,
+
+    #[account(
+        init_if_needed,
+        payer = player,
+        space = 8 + PlayerChoice::LEN,
+        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player.key().as_ref()],
+        bump
+    )]
+    pub player_choice: Account<'info, PlayerChoice>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -358,6 +384,7 @@ pub struct RevealWinner<'info> {
     #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
 
+    /// Player1's choice PDA (derived automatically)
     #[account(
         mut,
         seeds = [PLAYER_CHOICE_SEED, &game.game_id.to_le_bytes(), game.player1.unwrap().as_ref()],
@@ -365,12 +392,30 @@ pub struct RevealWinner<'info> {
     )]
     pub player1_choice: Account<'info, PlayerChoice>,
 
+    /// Player2's choice PDA (derived automatically)
     #[account(
         mut,
         seeds = [PLAYER_CHOICE_SEED, &game.game_id.to_le_bytes(), game.player2.unwrap().as_ref()],
         bump
     )]
     pub player2_choice: Account<'info, PlayerChoice>,
+
+    /// CHECK: Manual serialization to avoid Anchor double-write conflict with TEE commit
+    #[account(
+        mut,
+        seeds = [PLAYER_PROFILE_SEED, game.player1.unwrap().as_ref()],
+        bump
+    )]
+    pub player1_profile: UncheckedAccount<'info>,
+
+    /// CHECK: Manual serialization to avoid Anchor double-write conflict with TEE commit
+    #[account(
+        mut,
+        seeds = [PLAYER_PROFILE_SEED, game.player2.unwrap().as_ref()],
+        bump
+    )]
+    pub player2_profile: UncheckedAccount<'info>,
+
     /// CHECK: Checked by the permission program
     #[account(mut)]
     pub permission_game: UncheckedAccount<'info>,
@@ -386,19 +431,6 @@ pub struct RevealWinner<'info> {
     /// CHECK: PERMISSION PROGRAM
     #[account(address = PERMISSION_PROGRAM_ID)]
     pub permission_program: UncheckedAccount<'info>,
-
-    // NOTE: MagicBlock accounts removed/handled by macro or check?
-    // If I put them back, I risk duplicate error.
-    // If I leave them out, I risk missing account error.
-    // The "Nuclear Test" PASSED with the Baseline file.
-    // The Baseline file (Step 2314) READ included them.
-    // So they SHOULD be here if following Baseline.
-    // I will add them back because the Nuclear test passed WITH them.
-    /// CHECK: MagicBlock Program
-    pub magic_program: UncheckedAccount<'info>,
-    /// CHECK: MagicBlock Context
-    #[account(mut)]
-    pub magic_context: UncheckedAccount<'info>,
 }
 
 /// Unified delegate PDA context
@@ -426,101 +458,6 @@ pub struct CreatePermission<'info> {
     #[account(address = PERMISSION_PROGRAM_ID)]
     pub permission_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct InitializePlayer<'info> {
-    #[account(
-        init,
-        payer = payer,
-        space = 8 + PlayerProfile::LEN,
-        seeds = [PLAYER_PROFILE_SEED, payer.key().as_ref()],
-        bump
-    )]
-    pub player_profile: Account<'info, PlayerProfile>,
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-#[instruction(queue_id: String)]
-pub struct InitializeMsgQueue<'info> {
-    #[account(mut)]
-    /// CHECK: Queue account to be initialized via CPI
-    pub queue: UncheckedAccount<'info>,
-    // Note: This assumes we are initializing a PDA owned by the matchmaking program or this program?
-    // The original code used CPI to initialize.
-    // Let's verify context.
-    #[account(
-        mut,
-        seeds = [b"queue-authority"],
-        bump
-    )]
-    /// CHECK: Authority PDA for the queue
-    pub authority: UncheckedAccount<'info>,
-
-    #[account(mut)]
-    pub payer: Signer<'info>,
-
-    /// CHECK: Matchmaking Program ID
-    pub matchmaking_program: UncheckedAccount<'info>,
-    /// CHECK: Tenant Program ID (This Program)
-    pub tenant_program_id: UncheckedAccount<'info>,
-    pub system_program: Program<'info, System>,
-
-    // Extra accounts for CPI
-    /// CHECK: Page 0 PDA
-    #[account(mut)]
-    pub page: UncheckedAccount<'info>,
-    /// CHECK: Buffer PDA
-    #[account(mut)]
-    pub buffer_pda: UncheckedAccount<'info>,
-    /// CHECK: Delegation Record
-    #[account(mut)]
-    pub delegation_record_pda: UncheckedAccount<'info>,
-    /// CHECK: Delegation Metadata
-    #[account(mut)]
-    pub delegation_metadata_pda: UncheckedAccount<'info>,
-    /// CHECK: Delegation Program
-    pub delegation_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-#[instruction(game_id: u64)]
-pub struct JoinSession<'info> {
-    #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + Game::LEN,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
-        bump
-    )]
-    pub game: Account<'info, Game>,
-
-    #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + PlayerChoice::LEN,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player.key().as_ref()],
-        bump
-    )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
-    #[account(mut)]
-    pub player: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct GetPlayerElo<'info> {
-    #[account(
-        seeds = [PLAYER_PROFILE_SEED, player.key().as_ref()],
-        bump
-    )]
-    pub player_profile: Account<'info, PlayerProfile>,
-    /// CHECK: Player key (public)
-    pub player: UncheckedAccount<'info>,
 }
 
 #[account]
@@ -556,22 +493,23 @@ impl PlayerChoice {
     pub const LEN: usize = 8 + 8 + 32 + 2;
 }
 
+#[account]
+pub struct PlayerProfile {
+    pub player: Pubkey,
+    pub elo: u64,
+    pub games_played: u64,
+    pub games_won: u64,
+}
+
+impl PlayerProfile {
+    pub const LEN: usize = 8 + 32 + 8 + 8 + 8;
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, Debug)]
 pub enum Choice {
     Rock,
     Paper,
     Scissors,
-}
-
-#[account]
-pub struct PlayerProfile {
-    pub authority: Pubkey,
-    pub elo: u64,
-    pub wins: u64,
-    pub losses: u64,
-}
-impl PlayerProfile {
-    pub const LEN: usize = 8 + 32 + 8 + 8 + 8;
 }
 
 #[error_code]
@@ -586,14 +524,13 @@ pub enum GameError {
     MissingOpponent,
     #[msg("Game is already full.")]
     GameFull,
-    #[msg("Invalid PDA")]
-    InvalidPda,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub enum AccountType {
     Game { game_id: u64 },
     PlayerChoice { game_id: u64, player: Pubkey },
+    PlayerProfile { player: Pubkey },
 }
 
 fn derive_seeds_from_account_type(account_type: &AccountType) -> Vec<Vec<u8>> {
@@ -607,6 +544,9 @@ fn derive_seeds_from_account_type(account_type: &AccountType) -> Vec<Vec<u8>> {
                 game_id.to_le_bytes().to_vec(),
                 player.to_bytes().to_vec(),
             ]
+        }
+        AccountType::PlayerProfile { player } => {
+            vec![PLAYER_PROFILE_SEED.to_vec(), player.to_bytes().to_vec()]
         }
     }
 }
