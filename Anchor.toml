@@ -2,8 +2,7 @@
 resolution = true
 skip-lint = false
 
-[programs.devnet]
-anchor_rock_paper_scissor = "2GTfaH7ZeZ29SubUzbUyKqQAucNLeNhkRhXUZA8bUyLs"
+anchor_rock_paper_scissor = "3w8UKETTZtGv5cgBvyyuNv8EXPbfBPVXLYRqbjTMeSCu"
 
 [programs.localnet]
 anchor_rock_paper_scissor = "xc7RtasEqM2YNaRSiFfiMGKrHM6EjbbcGLK4b2fzjhb"
@@ -16,4 +15,4 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "NODE_OPTIONS='--no-deprecation' npx ts-mocha -p ./tsconfig.json -t 120000 tests/rps.ts"
+test = "NODE_OPTIONS='--no-deprecation' npx ts-mocha -p ./tsconfig.json -t 120000 tests/single-probe.ts"

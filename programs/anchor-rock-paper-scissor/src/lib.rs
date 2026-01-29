@@ -9,7 +9,7 @@ use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
-declare_id!("2GTfaH7ZeZ29SubUzbUyKqQAucNLeNhkRhXUZA8bUyLs");
+declare_id!("3w8UKETTZtGv5cgBvyyuNv8EXPbfBPVXLYRqbjTMeSCu");
 
 pub const PLAYER_CHOICE_SEED: &[u8] = b"player_choice";
 pub const GAME_SEED: &[u8] = b"game";
@@ -24,7 +24,7 @@ pub mod anchor_rock_paper_scissor {
     // 0️⃣ Initialize Player Profile (L1)
     pub fn initialize_player(ctx: Context<InitializePlayer>) -> Result<()> {
         let profile = &mut ctx.accounts.profile;
-        profile.player = ctx.accounts.payer.key();
+        profile.player = ctx.accounts.player.key();
         profile.elo = 1000;
         profile.games_played = 0;
         profile.games_won = 0;
@@ -217,10 +217,10 @@ pub mod anchor_rock_paper_scissor {
         // Write Data (overwrite entire buffer including discriminator)
         {
             let mut data = ctx.accounts.player1_profile.data.borrow_mut();
+            msg!("P1 Data Before: {:?}", &data[0..16]); // Log first 16 bytes (Discriminator + PubKey part)
             let mut cursor = &mut data[..];
             player1_profile.try_serialize(&mut cursor)?;
-            // Debug: Modify lamports to verify write access
-            **ctx.accounts.player1_profile.lamports.borrow_mut() -= 1000;
+            msg!("P1 Data After: {:?}", &data[0..16]);
         }
         {
             let mut data = ctx.accounts.player2_profile.data.borrow_mut();
@@ -236,7 +236,8 @@ pub mod anchor_rock_paper_scissor {
             &ctx.accounts.payer,
             vec![
                 &game.to_account_info(),
-                // Profiles excluded to verify local TEE persistence and write access
+                &ctx.accounts.player1_profile.to_account_info(),
+                &ctx.accounts.player2_profile.to_account_info(),
             ],
             magic_context,
             magic_program,
@@ -306,10 +307,12 @@ pub struct InitializePlayer<'info> {
         init,
         payer = payer,
         space = 8 + PlayerProfile::LEN,
-        seeds = [PLAYER_PROFILE_SEED, payer.key().as_ref()],
+        seeds = [PLAYER_PROFILE_SEED, player.key().as_ref()],
         bump
     )]
     pub profile: Account<'info, PlayerProfile>,
+    #[account(mut)]
+    pub player: Signer<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
