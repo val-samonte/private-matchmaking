@@ -1,8 +1,6 @@
 use anchor_lang::prelude::*;
 
-use ephemeral_rollups_sdk::access_control::instructions::{
-    CreatePermissionCpiBuilder, UpdatePermissionCpiBuilder,
-};
+use ephemeral_rollups_sdk::access_control::instructions::CreatePermissionCpiBuilder;
 use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs};
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
@@ -11,8 +9,7 @@ use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
 declare_id!("3w8UKETTZtGv5cgBvyyuNv8EXPbfBPVXLYRqbjTMeSCu");
 
-pub const PLAYER_CHOICE_SEED: &[u8] = b"player_choice";
-pub const GAME_SEED: &[u8] = b"game";
+pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v3";
 pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile";
 
 #[ephemeral]
@@ -32,222 +29,194 @@ pub mod anchor_rock_paper_scissor {
         Ok(())
     }
 
-    // 1️⃣ Create and auto-join as Player 1
-    pub fn create_game(ctx: Context<CreateGame>, game_id: u64) -> Result<()> {
-        let game = &mut ctx.accounts.game;
-        let player1 = ctx.accounts.player1.key();
-
-        game.game_id = game_id;
-        game.player1 = Some(player1);
-        game.player2 = None;
-        game.result = GameResult::None;
-
-        msg!("Game ID: {}", game_id);
-        msg!("Player 1 PDA: {}", player1);
-
-        // initialize PlayerChoice for player 1
-        let player_choice = &mut ctx.accounts.player_choice;
-        player_choice.game_id = game_id;
-        player_choice.player = player1;
-        player_choice.choice = None;
-
-        msg!("Game {} created and joined by {}", game_id, player1);
-
+    // 0.5️⃣ Initialize Matchmaking State (L1 - Admin/One-time)
+    pub fn initialize_matchmaking(ctx: Context<InitializeMatchmaking>) -> Result<()> {
+        let state = &mut ctx.accounts.matchmaking_state;
+        state.bump = ctx.bumps.matchmaking_state;
+        state.next_game_id = 1;
+        state.queue = Vec::new();
+        state.games = Vec::new();
+        msg!("Matchmaking State Initialized");
         Ok(())
     }
 
-    // 2️⃣ Player 2 joins the game
-    pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
-        let game = &mut ctx.accounts.game;
+    // 1️⃣ Ready / Auto-Match (TEE)
+    // - If queue empty: Join queue.
+    // - If queue has someone: Match immediately, create internal game.
+    pub fn ready(ctx: Context<Ready>) -> Result<()> {
+        let state = &mut ctx.accounts.matchmaking_state;
         let player = ctx.accounts.player.key();
 
-        require!(game.player1 != Some(player), GameError::CannotJoinOwnGame);
-        require!(game.player2.is_none(), GameError::GameFull);
+        // 1. Check if already in a game
+        if state
+            .games
+            .iter()
+            .any(|g| g.player1 == player || g.player2 == player)
+        {
+            return err!(GameError::AlreadyInGame);
+        }
 
-        game.player2 = Some(player);
+        // 2. Check if already in queue
+        if state.queue.contains(&player) {
+            msg!("Player {} already in queue", player);
+            return Ok(());
+        }
 
-        // Create PlayerChoice PDA for player 2
-        let player_choice = &mut ctx.accounts.player_choice;
-        player_choice.game_id = game_id;
-        player_choice.player = player;
-        player_choice.choice = None;
+        // 3. Matchmaking Logic
+        if let Some(opponent) = state.queue.pop() {
+            // Found a match!
+            let game_id = state.next_game_id;
+            state.next_game_id += 1;
 
-        msg!("{} joined Game {} as player 2", player, game_id);
+            let new_game = InternalGame {
+                game_id,
+                player1: opponent,
+                player2: player,
+                player1_choice: None,
+                player2_choice: None,
+                result: GameResult::None,
+            };
+            state.games.push(new_game);
+            msg!("Matched! Game ID: {} ({} vs {})", game_id, opponent, player);
+        } else {
+            // No match, enqueue
+            state.queue.push(player);
+            msg!("Player {} added to queue", player);
+        }
+
         Ok(())
     }
 
-    // 3️⃣ Player makes a choice
-    pub fn make_choice(ctx: Context<MakeChoice>, _game_id: u64, choice: Choice) -> Result<()> {
-        let player_choice = &mut ctx.accounts.player_choice;
-        require!(player_choice.choice.is_none(), GameError::AlreadyChose);
+    // 2️⃣ Make Choice (TEE)
+    // Finds the player's active game in MatchmakingState and records choice.
+    pub fn make_choice(ctx: Context<MakeChoice>, choice: Choice) -> Result<()> {
+        let state = &mut ctx.accounts.matchmaking_state;
+        let player = ctx.accounts.player.key();
 
-        player_choice.choice = choice.into();
-        msg!(
-            "Player {:?} made choice {:?}",
-            player_choice.player,
-            player_choice.choice
-        );
+        // Find game
+        let game_idx = state
+            .games
+            .iter()
+            .position(|g| g.player1 == player || g.player2 == player)
+            .ok_or(GameError::GameNotFound)?;
+
+        let game = &mut state.games[game_idx];
+
+        // Record choice
+        if game.player1 == player {
+            require!(game.player1_choice.is_none(), GameError::AlreadyChose);
+            game.player1_choice = Some(choice.clone().into());
+        } else {
+            require!(game.player2_choice.is_none(), GameError::AlreadyChose);
+            game.player2_choice = Some(choice.clone().into());
+        }
+
+        msg!("Player {} chose {:?}", player, choice);
+
+        // Check if game is complete (both decided)
+        if game.player1_choice.is_some() && game.player2_choice.is_some() {
+            // 4️⃣ Determine winner logic (Internal)
+            let c1 = game.player1_choice.clone().unwrap();
+            let c2 = game.player2_choice.clone().unwrap();
+
+            game.result = match (c1, c2) {
+                (Choice::Rock, Choice::Scissors)
+                | (Choice::Paper, Choice::Rock)
+                | (Choice::Scissors, Choice::Paper) => GameResult::Winner(game.player1),
+
+                (Choice::Rock, Choice::Paper)
+                | (Choice::Paper, Choice::Scissors)
+                | (Choice::Scissors, Choice::Rock) => GameResult::Winner(game.player2),
+
+                _ => GameResult::Tie,
+            };
+            msg!("Game {} Finished! Result: {:?}", game.game_id, game.result);
+        }
 
         Ok(())
     }
 
-    // 4️⃣ Reveal and record the winner
+    // 3️⃣ Reveal Winner (TEE -> L1)
+    // Resolves ELO and removes game from internal state.
     pub fn reveal_winner(ctx: Context<RevealWinner>) -> Result<()> {
-        let game = &mut ctx.accounts.game;
-        let player1_choice = &ctx.accounts.player1_choice;
-        let player2_choice = &ctx.accounts.player2_choice;
-        let permission_program = &ctx.accounts.permission_program.to_account_info();
-        let permission_game = &ctx.accounts.permission_game.to_account_info();
-        let permission1 = &ctx.accounts.permission1.to_account_info();
-        let permission2 = &ctx.accounts.permission2.to_account_info();
-        let magic_program = &ctx.accounts.magic_program.to_account_info();
-        let _magic_program = &ctx.accounts.magic_program.to_account_info();
-        let magic_context = &ctx.accounts.magic_context.to_account_info();
-        let mut player1_profile =
-            PlayerProfile::try_deserialize(&mut &**ctx.accounts.player1_profile.data.borrow())?;
-        let mut player2_profile =
-            PlayerProfile::try_deserialize(&mut &**ctx.accounts.player2_profile.data.borrow())?;
+        let state = &mut ctx.accounts.matchmaking_state;
 
-        // 1️⃣ Clone choices into game
-        game.player1_choice = player1_choice.choice.clone().into();
-        game.player2_choice = player2_choice.choice.clone().into();
+        // Deserialize profiles first to get keys
+        let mut p1_data = ctx.accounts.player1_profile.try_borrow_mut_data()?;
+        let mut p1_state = PlayerProfile::try_deserialize(&mut &p1_data[..])?;
+        let player1 = p1_state.player;
 
-        // 2️⃣ Ensure both players exist
-        let player1 = game.player1.ok_or(GameError::MissingOpponent)?;
-        let player2 = game.player2.ok_or(GameError::MissingOpponent)?;
+        let mut p2_data = ctx.accounts.player2_profile.try_borrow_mut_data()?;
+        let mut p2_state = PlayerProfile::try_deserialize(&mut &p2_data[..])?;
+        let player2 = p2_state.player;
 
-        // 3️⃣ Ensure both players made a choice
-        let choice1 = game
-            .player1_choice
-            .clone()
-            .ok_or(GameError::MissingChoice)?;
-        let choice2 = game
-            .player2_choice
-            .clone()
-            .ok_or(GameError::MissingChoice)?;
+        // Find completed game between these two
+        let game_idx = state
+            .games
+            .iter()
+            .position(|g| {
+                (g.player1 == player1 && g.player2 == player2)
+                    || (g.player1 == player2 && g.player2 == player1)
+            })
+            .ok_or(GameError::GameNotFound)?;
 
-        // 4️⃣ Determine winner based on choices
-        game.result = match (choice1, choice2) {
-            (Choice::Rock, Choice::Scissors)
-            | (Choice::Paper, Choice::Rock)
-            | (Choice::Scissors, Choice::Paper) => GameResult::Winner(player1),
+        let game = state.games[game_idx];
 
-            (Choice::Rock, Choice::Paper)
-            | (Choice::Paper, Choice::Scissors)
-            | (Choice::Scissors, Choice::Rock) => GameResult::Winner(player2),
-
-            _ => GameResult::Tie,
-        };
-
-        // 5️⃣ Update ELO and Stats
-        match &game.result {
-            GameResult::Winner(winner) => {
-                if *winner == player1 {
-                    player1_profile.elo = player1_profile.elo.checked_add(32).unwrap_or(u64::MAX);
-                    player1_profile.games_won =
-                        player1_profile.games_won.checked_add(1).unwrap_or(u64::MAX);
-                    player2_profile.elo = player2_profile.elo.saturating_sub(32);
-                } else {
-                    player2_profile.elo = player2_profile.elo.checked_add(32).unwrap_or(u64::MAX);
-                    player2_profile.games_won =
-                        player2_profile.games_won.checked_add(1).unwrap_or(u64::MAX);
-                    player1_profile.elo = player1_profile.elo.saturating_sub(32);
-                }
-                player1_profile.games_played = player1_profile
-                    .games_played
-                    .checked_add(1)
-                    .unwrap_or(u64::MAX);
-                player2_profile.games_played = player2_profile
-                    .games_played
-                    .checked_add(1)
-                    .unwrap_or(u64::MAX);
-            }
-            GameResult::Tie => {
-                player1_profile.games_played = player1_profile
-                    .games_played
-                    .checked_add(1)
-                    .unwrap_or(u64::MAX);
-                player2_profile.games_played = player2_profile
-                    .games_played
-                    .checked_add(1)
-                    .unwrap_or(u64::MAX);
-            }
+        // Ensure game has a result
+        match game.result {
+            GameResult::None => return err!(GameError::GameNotFinished),
             _ => {}
         }
 
-        // Write Data (skip first 8 bytes to preserve discriminator)
+        // 5️⃣ Update ELO and Stats
+        // Logic uses p1_state and p2_state which we already have mutable access to via deserialization
+        // But to write back, we need to re-serialize at the end.
 
-        UpdatePermissionCpiBuilder::new(&permission_program)
-            .permissioned_account(&game.to_account_info(), true)
-            .authority(&game.to_account_info(), false)
-            .permission(&permission_game.to_account_info())
-            .args(MembersArgs { members: None })
-            .invoke_signed(&[&[GAME_SEED, &game.game_id.to_le_bytes(), &[ctx.bumps.game]]])?;
+        // Double check IDs (Redundant but safe)
+        require!(p1_state.player == game.player1, GameError::InvalidOpponent);
+        require!(p2_state.player == game.player2, GameError::InvalidOpponent);
 
-        msg!("TEE_LOG: Player 1 ELO Calculated: {}", player1_profile.elo);
-        msg!("TEE_LOG: Player 2 ELO Calculated: {}", player2_profile.elo);
-
-        msg!("TEE_LOG: Player 1 ELO Calculated: {}", player1_profile.elo);
-        msg!("TEE_LOG: Player 2 ELO Calculated: {}", player2_profile.elo);
-
-        UpdatePermissionCpiBuilder::new(&permission_program)
-            .permissioned_account(&player1_choice.to_account_info(), true)
-            .authority(&player1_choice.to_account_info(), false)
-            .permission(&permission1.to_account_info())
-            .args(MembersArgs { members: None })
-            .invoke_signed(&[&[
-                PLAYER_CHOICE_SEED,
-                &player1_choice.game_id.to_le_bytes(),
-                &player1_choice.player.as_ref(),
-                &[ctx.bumps.player1_choice],
-            ]])?;
-
-        UpdatePermissionCpiBuilder::new(&permission_program)
-            .permissioned_account(&player2_choice.to_account_info(), true)
-            .authority(&player2_choice.to_account_info(), false)
-            .permission(&permission2.to_account_info())
-            .args(MembersArgs { members: None })
-            .invoke_signed(&[&[
-                PLAYER_CHOICE_SEED,
-                &player2_choice.game_id.to_le_bytes(),
-                &player2_choice.player.as_ref(),
-                &[ctx.bumps.player2_choice],
-            ]])?;
-
-        // Write Data (overwrite entire buffer including discriminator)
-        {
-            let mut data = ctx.accounts.player1_profile.data.borrow_mut();
-            msg!("P1 Data Before: {:?}", &data[0..16]); // Log first 16 bytes (Discriminator + PubKey part)
-            let mut cursor = &mut data[..];
-            player1_profile.try_serialize(&mut cursor)?;
-            msg!("P1 Data After: {:?}", &data[0..16]);
-        }
-        {
-            let mut data = ctx.accounts.player2_profile.data.borrow_mut();
-            let mut cursor = &mut data[..];
-            player2_profile.try_serialize(&mut cursor)?;
+        match game.result {
+            GameResult::Winner(winner) => {
+                if winner == p1_state.player {
+                    p1_state.elo = p1_state.elo.checked_add(32).unwrap_or(u64::MAX);
+                    p1_state.games_won = p1_state.games_won.checked_add(1).unwrap_or(u64::MAX);
+                    p2_state.elo = p2_state.elo.saturating_sub(32);
+                } else {
+                    p2_state.elo = p2_state.elo.checked_add(32).unwrap_or(u64::MAX);
+                    p2_state.games_won = p2_state.games_won.checked_add(1).unwrap_or(u64::MAX);
+                    p1_state.elo = p1_state.elo.saturating_sub(32);
+                }
+            }
+            _ => { /* Tie logic constraint: just add games played */ }
         }
 
-        msg!("Result: {:?}", &game.result);
+        p1_state.games_played += 1;
+        p2_state.games_played += 1;
 
-        game.exit(&crate::ID)?;
+        // Serialize back
+        p1_state.try_serialize(&mut &mut p1_data[..])?;
+        p2_state.try_serialize(&mut &mut p2_data[..])?;
 
-        commit_and_undelegate_accounts(
-            &ctx.accounts.payer,
-            vec![
-                &game.to_account_info(),
-                &ctx.accounts.player1_profile.to_account_info(),
-                &ctx.accounts.player2_profile.to_account_info(),
-            ],
-            magic_context,
-            magic_program,
-        )?;
+        // Remove game from state
+        state.games.remove(game_idx);
+
+        // Commit everything (Disabled for L1 Verification)
+        // commit_and_undelegate_accounts(
+        //     &ctx.accounts.payer,
+        //     vec![
+        //         &ctx.accounts.matchmaking_state.to_account_info(),
+        //         &ctx.accounts.player1_profile.to_account_info(),
+        //         &ctx.accounts.player2_profile.to_account_info(),
+        //     ],
+        //     &ctx.accounts.magic_context.to_account_info(),
+        //     &ctx.accounts.magic_program.to_account_info(),
+        // )?;
 
         Ok(())
     }
 
     /// Delegate account to the delegation program based on account type
-    /// Set specific validator based on ER, see https://docs.magicblock.gg/pages/get-started/how-integrate-your-program/local-setup
     pub fn delegate_pda(ctx: Context<DelegatePda>, account_type: AccountType) -> Result<()> {
         let seed_data = derive_seeds_from_account_type(&account_type);
         let seeds_refs: Vec<&[u8]> = seed_data.iter().map(|s| s.as_slice()).collect();
@@ -265,7 +234,6 @@ pub mod anchor_rock_paper_scissor {
     }
 
     /// Creates a permission based on account type input.
-    /// Derives the bump from the account type and seeds, then calls the permission program.
     pub fn create_permission(
         ctx: Context<CreatePermission>,
         account_type: AccountType,
@@ -319,65 +287,40 @@ pub struct InitializePlayer<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(game_id: u64)]
-pub struct CreateGame<'info> {
+pub struct InitializeMatchmaking<'info> {
     #[account(
-        init_if_needed,
-        payer = player1,
-        space = 8 + Game::LEN,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
+        init,
+        payer = payer,
+        space = 8 + MatchmakingState::LEN,
+        seeds = [MATCHMAKING_STATE_SEED],
         bump
     )]
-    pub game: Account<'info, Game>,
-
-    #[account(
-        init_if_needed,
-        payer = player1,
-        space = 8 + PlayerChoice::LEN,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player1.key().as_ref()],
-        bump
-    )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
+    pub matchmaking_state: Account<'info, MatchmakingState>,
     #[account(mut)]
-    pub player1: Signer<'info>,
+    pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(game_id: u64)]
-pub struct JoinGame<'info> {
+pub struct Ready<'info> {
     #[account(
         mut,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
+        seeds = [MATCHMAKING_STATE_SEED],
         bump
     )]
-    pub game: Account<'info, Game>,
-
-    #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + PlayerChoice::LEN,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player.key().as_ref()],
-        bump
-    )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
+    pub matchmaking_state: Account<'info, MatchmakingState>,
     #[account(mut)]
     pub player: Signer<'info>,
-    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(game_id: u64)]
 pub struct MakeChoice<'info> {
     #[account(
         mut,
-        seeds = [PLAYER_CHOICE_SEED, &game_id.to_le_bytes(), player.key().as_ref()],
+        seeds = [MATCHMAKING_STATE_SEED],
         bump
     )]
-    pub player_choice: Account<'info, PlayerChoice>,
-
+    pub matchmaking_state: Account<'info, MatchmakingState>,
     #[account(mut)]
     pub player: Signer<'info>,
 }
@@ -385,56 +328,25 @@ pub struct MakeChoice<'info> {
 #[commit]
 #[derive(Accounts)]
 pub struct RevealWinner<'info> {
-    #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
-    pub game: Account<'info, Game>,
+    #[account(mut, seeds = [MATCHMAKING_STATE_SEED], bump)]
+    pub matchmaking_state: Account<'info, MatchmakingState>,
 
-    /// Player1's choice PDA (derived automatically)
-    #[account(
-        mut,
-        seeds = [PLAYER_CHOICE_SEED, &game.game_id.to_le_bytes(), game.player1.unwrap().as_ref()],
-        bump
-    )]
-    pub player1_choice: Account<'info, PlayerChoice>,
-
-    /// Player2's choice PDA (derived automatically)
-    #[account(
-        mut,
-        seeds = [PLAYER_CHOICE_SEED, &game.game_id.to_le_bytes(), game.player2.unwrap().as_ref()],
-        bump
-    )]
-    pub player2_choice: Account<'info, PlayerChoice>,
-
-    /// CHECK: Manual serialization to avoid Anchor double-write conflict with TEE commit
-    #[account(
-        mut,
-        seeds = [PLAYER_PROFILE_SEED, game.player1.unwrap().as_ref()],
-        bump
-    )]
-    pub player1_profile: UncheckedAccount<'info>,
-
-    /// CHECK: Manual serialization to avoid Anchor double-write conflict with TEE commit
-    #[account(
-        mut,
-        seeds = [PLAYER_PROFILE_SEED, game.player2.unwrap().as_ref()],
-        bump
-    )]
-    pub player2_profile: UncheckedAccount<'info>,
-
-    /// CHECK: Checked by the permission program
+    /// CHECK: Manual serialization and verification
     #[account(mut)]
-    pub permission_game: UncheckedAccount<'info>,
-    /// CHECK: Checked by the permission program
+    pub player1_profile: AccountInfo<'info>,
+
+    /// CHECK: Manual serialization and verification
     #[account(mut)]
-    pub permission1: UncheckedAccount<'info>,
-    /// CHECK: Checked by the permission program
-    #[account(mut)]
-    pub permission2: UncheckedAccount<'info>,
-    /// Anyone can trigger this
+    pub player2_profile: AccountInfo<'info>,
+
+    /// Anyone can trigger this if game is done
     #[account(mut)]
     pub payer: Signer<'info>,
-    /// CHECK: PERMISSION PROGRAM
-    #[account(address = PERMISSION_PROGRAM_ID)]
-    pub permission_program: UncheckedAccount<'info>,
+
+    /// CHECK: Magic
+    pub magic_context: AccountInfo<'info>,
+    /// CHECK: Magic
+    pub magic_program: AccountInfo<'info>,
 }
 
 /// Unified delegate PDA context
@@ -465,36 +377,30 @@ pub struct CreatePermission<'info> {
 }
 
 #[account]
-pub struct Game {
+pub struct MatchmakingState {
+    pub bump: u8,
+    pub next_game_id: u64,
+    pub queue: Vec<Pubkey>,
+    pub games: Vec<InternalGame>,
+}
+
+impl MatchmakingState {
+    // 50KB space buffer
+    pub const LEN: usize = 8 + 1 + 8 + (4 + 32 * 5) + (4 + InternalGame::LEN * 5);
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
+pub struct InternalGame {
     pub game_id: u64,
-    pub player1: Option<Pubkey>,
-    pub player2: Option<Pubkey>,
+    pub player1: Pubkey,
+    pub player2: Pubkey,
     pub player1_choice: Option<Choice>,
     pub player2_choice: Option<Choice>,
     pub result: GameResult,
 }
-impl Game {
-    pub const LEN: usize = 8                // game_id
-        + (32 + 1) * 2                       // player1, player2
-        + (1 + 1) * 2                        // player1_choice, player2_choice
-        + (1 + 32); // result (1 byte tag + 32 bytes pubkey for Winner variant)
-}
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, Debug)]
-pub enum GameResult {
-    Winner(Pubkey),
-    Tie,
-    None,
-}
-
-#[account]
-pub struct PlayerChoice {
-    pub game_id: u64,
-    pub player: Pubkey,
-    pub choice: Option<Choice>,
-}
-impl PlayerChoice {
-    pub const LEN: usize = 8 + 8 + 32 + 2;
+impl InternalGame {
+    pub const LEN: usize = 8 + 32 + 32 + 2 + 2 + (1 + 32); // ~107 bytes
 }
 
 #[account]
@@ -509,7 +415,14 @@ impl PlayerProfile {
     pub const LEN: usize = 8 + 32 + 8 + 8 + 8;
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GameResult {
+    Winner(Pubkey),
+    Tie,
+    None,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Choice {
     Rock,
     Paper,
@@ -520,34 +433,26 @@ pub enum Choice {
 pub enum GameError {
     #[msg("You already made your choice.")]
     AlreadyChose,
-    #[msg("You cannot join your own game.")]
-    CannotJoinOwnGame,
-    #[msg("Both players must make a choice first.")]
-    MissingChoice,
-    #[msg("Opponent not found.")]
-    MissingOpponent,
-    #[msg("Game is already full.")]
-    GameFull,
+    #[msg("You are already in a game or queue.")]
+    AlreadyInGame,
+    #[msg("Game not found.")]
+    GameNotFound,
+    #[msg("Game not finished.")]
+    GameNotFinished,
+    #[msg("Invalid opponent provided for ELO update.")]
+    InvalidOpponent,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub enum AccountType {
-    Game { game_id: u64 },
-    PlayerChoice { game_id: u64, player: Pubkey },
+    MatchmakingState,
     PlayerProfile { player: Pubkey },
 }
 
 fn derive_seeds_from_account_type(account_type: &AccountType) -> Vec<Vec<u8>> {
     match account_type {
-        AccountType::Game { game_id } => {
-            vec![GAME_SEED.to_vec(), game_id.to_le_bytes().to_vec()]
-        }
-        AccountType::PlayerChoice { game_id, player } => {
-            vec![
-                PLAYER_CHOICE_SEED.to_vec(),
-                game_id.to_le_bytes().to_vec(),
-                player.to_bytes().to_vec(),
-            ]
+        AccountType::MatchmakingState => {
+            vec![MATCHMAKING_STATE_SEED.to_vec()]
         }
         AccountType::PlayerProfile { player } => {
             vec![PLAYER_PROFILE_SEED.to_vec(), player.to_bytes().to_vec()]
