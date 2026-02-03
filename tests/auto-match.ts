@@ -86,8 +86,8 @@ describe("auto-match", () => {
   let authToken: any;
 
   // Accounts
-  const matchmakingStateSeed = Buffer.from("matchmaking_state_v22");
-  const playerProfileSeed = Buffer.from("player_profile_v22");
+  const matchmakingStateSeed = Buffer.from("matchmaking_state_v25");
+  const playerProfileSeed = Buffer.from("player_profile_v25");
 
   const [matchmakingStatePda] = PublicKey.findProgramAddressSync(
     [matchmakingStateSeed],
@@ -169,7 +169,20 @@ describe("auto-match", () => {
   });
 
   after("Teardown and Reclaim SOL", async () => {
-    // Close Matchmaking State (Refunds Provider)
+    // 1. Reclaim Matchmaking State (Undelegate)
+    try {
+        await program.methods.reclaimMatchmaking().accounts({
+            matchmakingState: matchmakingStatePda,
+            payer: provider.wallet.publicKey,
+            magicContext: MAGIC_CONTEXT_DEVNET,
+            magicProgram: MAGIC_PROGRAM_ID,
+        }).rpc();
+        console.log("Reclaimed Matchmaking State ownership");
+    } catch (e) {
+        console.error("Failed to reclaim Matchmaking State ownership:", e);
+    }
+
+    // 2. Close Matchmaking State (Refunds Provider)
     try {
         await program.methods.closeMatchmaking().accounts({
             matchmakingState: matchmakingStatePda,
@@ -177,10 +190,25 @@ describe("auto-match", () => {
         }).rpc();
         console.log("Reclaimed Matchmaking State rent");
     } catch (e) {
-        console.log("Matchmaking State already closed or not found");
+        console.error("Failed to reclaim Matchmaking State rent:", e);
     }
 
-    // Close Player 1 Profile (Refunds Player 1)
+    // 3. Reclaim P1 Profile
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+        await program.methods.reclaimPlayer().accounts({
+            profile: p1ProfilePda,
+            player: player1.publicKey,
+            payer: player1.publicKey,
+            magicContext: MAGIC_CONTEXT_DEVNET,
+            magicProgram: MAGIC_PROGRAM_ID,
+        }).signers([player1]).rpc();
+        console.log("Reclaimed P1 Profile ownership");
+    } catch (e) {
+        console.error("Failed to reclaim P1 ownership:", e);
+    }
+
+    // 4. Close Player 1 Profile
     try {
         await program.methods.closePlayer().accounts({
             profile: p1ProfilePda,
@@ -189,10 +217,25 @@ describe("auto-match", () => {
         }).signers([player1]).rpc();
         console.log("Reclaimed P1 Profile rent");
     } catch (e) {
-        console.log("P1 Profile already closed");
+        console.error("Failed to reclaim P1 Profile rent:", e);
     }
 
-    // Close Player 2 Profile (Refunds Player 2)
+    // 5. Reclaim P2 Profile
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+        await program.methods.reclaimPlayer().accounts({
+            profile: p2ProfilePda,
+            player: player2.publicKey,
+            payer: player2.publicKey,
+            magicContext: MAGIC_CONTEXT_DEVNET,
+            magicProgram: MAGIC_PROGRAM_ID,
+        }).signers([player2]).rpc();
+        console.log("Reclaimed P2 Profile ownership");
+    } catch (e) {
+        console.error("Failed to reclaim P2 ownership:", e);
+    }
+
+    // 6. Close Player 2 Profile
     try {
         await program.methods.closePlayer().accounts({
             profile: p2ProfilePda,
@@ -201,7 +244,7 @@ describe("auto-match", () => {
         }).signers([player2]).rpc();
         console.log("Reclaimed P2 Profile rent");
     } catch (e) {
-        console.log("P2 Profile already closed");
+        console.error("Failed to reclaim P2 Profile rent:", e);
     }
   });
 

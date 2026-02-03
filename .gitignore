@@ -9,3 +9,5 @@ test_output_2.log
 .gitignore
 test_output_3.log
 test_output.log
+reference_baseline
+reference_baseline
