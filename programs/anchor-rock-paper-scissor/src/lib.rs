@@ -9,8 +9,8 @@ use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accoun
 
 declare_id!("ENUPVoY1BtRBkdY5TwNqbQmpeU2nrUdJvRkPRDRqUuMU");
 
-pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v25";
-pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v25";
+pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v31";
+pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v31";
 
 #[ephemeral]
 #[program]
@@ -458,6 +458,7 @@ pub struct ReclaimMatchmaking<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     /// CHECK: Magic Context
+    #[account(mut)]
     pub magic_context: UncheckedAccount<'info>,
     /// CHECK: Magic Program
     #[account(address = MAGIC_PROGRAM_ID)]
@@ -473,6 +474,7 @@ pub struct ReclaimPlayer<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     /// CHECK: Magic Context
+    #[account(mut)]
     pub magic_context: UncheckedAccount<'info>,
     /// CHECK: Magic Program
     #[account(address = MAGIC_PROGRAM_ID)]

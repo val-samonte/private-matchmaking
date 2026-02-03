@@ -59,7 +59,7 @@ async function getAuthTokenManual(rpcUrl: string, publicKey: PublicKey, signMess
          throw new Error(`Login failed: ${authResponse.status} ${authResponse.statusText}. Body: ${text}`);
     }
 
-    const authJson = await authResponse.json();
+    const authJson = await authResponse.json() as { token: string; expiresAt?: number };
     if (typeof authJson.token !== "string" || authJson.token.length === 0) {
         throw new Error("No token received");
     }
@@ -67,6 +67,33 @@ async function getAuthTokenManual(rpcUrl: string, publicKey: PublicKey, signMess
     // Default expiration if not provided (30 days)
     const expiresAt = authJson.expiresAt ?? Date.now() + (1000 * 60 * 60 * 24 * 30);
     return { token: authJson.token, expiresAt };
+}
+
+// Helper to robustly wait for permission
+async function robustWaitUntilPermissionActive(
+  connection: Connection,
+  pda: PublicKey,
+  timeoutMs: number = 90000 
+) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+        // Note: SDK uses rpcEndpoint string, not Connection object usually?
+        // Checking waitUntilPermissionActive signature: (rpcUrl: string, pubkey: PublicKey)
+        await waitUntilPermissionActive(connection.rpcEndpoint, pda);
+        return;
+    } catch (e: any) {
+        if (e.message?.includes("Not Found") || e.message?.includes("Method Not Allowed") || e.message?.includes("404") || e.message?.includes("405")) {
+             console.log(`Waiting for permission indexing (ignoring ${e.message})...`);
+             await new Promise(r => setTimeout(r, 2000));
+        } else {
+            console.error("Unknown permission error:", e);
+             // retry anyway
+             await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+  }
+  throw new Error(`Timeout waiting for permission active on ${pda.toBase58()}`);
 }
 
 describe("auto-match", () => {
@@ -86,8 +113,8 @@ describe("auto-match", () => {
   let authToken: any;
 
   // Accounts
-  const matchmakingStateSeed = Buffer.from("matchmaking_state_v25");
-  const playerProfileSeed = Buffer.from("player_profile_v25");
+  const matchmakingStateSeed = Buffer.from("matchmaking_state_v31");
+  const playerProfileSeed = Buffer.from("player_profile_v31");
 
   const [matchmakingStatePda] = PublicKey.findProgramAddressSync(
     [matchmakingStateSeed],
@@ -172,10 +199,8 @@ describe("auto-match", () => {
     // 1. Reclaim Matchmaking State (Undelegate)
     try {
         await program.methods.reclaimMatchmaking().accounts({
-            matchmakingState: matchmakingStatePda,
             payer: provider.wallet.publicKey,
             magicContext: MAGIC_CONTEXT_DEVNET,
-            magicProgram: MAGIC_PROGRAM_ID,
         }).rpc();
         console.log("Reclaimed Matchmaking State ownership");
     } catch (e) {
@@ -185,7 +210,6 @@ describe("auto-match", () => {
     // 2. Close Matchmaking State (Refunds Provider)
     try {
         await program.methods.closeMatchmaking().accounts({
-            matchmakingState: matchmakingStatePda,
             payer: provider.wallet.publicKey,
         }).rpc();
         console.log("Reclaimed Matchmaking State rent");
@@ -197,11 +221,9 @@ describe("auto-match", () => {
     await new Promise(r => setTimeout(r, 1000));
     try {
         await program.methods.reclaimPlayer().accounts({
-            profile: p1ProfilePda,
             player: player1.publicKey,
             payer: player1.publicKey,
             magicContext: MAGIC_CONTEXT_DEVNET,
-            magicProgram: MAGIC_PROGRAM_ID,
         }).signers([player1]).rpc();
         console.log("Reclaimed P1 Profile ownership");
     } catch (e) {
@@ -211,7 +233,6 @@ describe("auto-match", () => {
     // 4. Close Player 1 Profile
     try {
         await program.methods.closePlayer().accounts({
-            profile: p1ProfilePda,
             player: player1.publicKey,
             payer: player1.publicKey,
         }).signers([player1]).rpc();
@@ -221,14 +242,12 @@ describe("auto-match", () => {
     }
 
     // 5. Reclaim P2 Profile
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 2000));
     try {
         await program.methods.reclaimPlayer().accounts({
-            profile: p2ProfilePda,
             player: player2.publicKey,
             payer: player2.publicKey,
             magicContext: MAGIC_CONTEXT_DEVNET,
-            magicProgram: MAGIC_PROGRAM_ID,
         }).signers([player2]).rpc();
         console.log("Reclaimed P2 Profile ownership");
     } catch (e) {
@@ -238,7 +257,6 @@ describe("auto-match", () => {
     // 6. Close Player 2 Profile
     try {
         await program.methods.closePlayer().accounts({
-            profile: p2ProfilePda,
             player: player2.publicKey,
             payer: player2.publicKey,
         }).signers([player2]).rpc();
@@ -252,9 +270,7 @@ describe("auto-match", () => {
     // 1. Initialize Matchmaking State
     try {
         await program.methods.initializeMatchmaking().accounts({
-            matchmakingState: matchmakingStatePda,
             payer: provider.wallet.publicKey,
-            systemProgram: SystemProgram.programId,
         }).rpc();
     } catch (e) {
         console.log("Matchmaking state might already exist", e);
@@ -262,17 +278,13 @@ describe("auto-match", () => {
 
     // 2. Initialize Profiles
     await program.methods.initializePlayer().accounts({
-        profile: p1ProfilePda,
         player: player1.publicKey,
         payer: player1.publicKey, // P1 pays
-        systemProgram: SystemProgram.programId,
     }).signers([player1]).rpc();
 
     await program.methods.initializePlayer().accounts({
-        profile: p2ProfilePda,
         player: player2.publicKey,
         payer: player2.publicKey, // P2 pays
-        systemProgram: SystemProgram.programId,
     }).signers([player2]).rpc();
 
     // Verify L1 State
@@ -330,7 +342,7 @@ describe("auto-match", () => {
 
     // Verify Delegation and Wait
     console.log("Waiting for Matchmaking State Permission to be active...");
-    await waitUntilPermissionActive(provider.connection.rpcEndpoint, matchmakingStatePda);
+    await robustWaitUntilPermissionActive(provider.connection, matchmakingStatePda);
     console.log("Matchmaking State Permission Active!");
 
 
@@ -421,25 +433,23 @@ describe("auto-match", () => {
      
      console.log("Delegation Complete (With Relayer Authority)");
      
-     console.log("Sleeping 30s to ensure indexing (brute force due to 405s)...");
-     await new Promise(r => setTimeout(r, 30000));
-     
      // console.log("Waiting for permissions to be active...");
      // const isActive = await waitUntilPermissionActive(ephemeralRpcEndpoint, matchmakingStatePda);
      const isActive = true;
      if (isActive) {
         console.log("Permissions Active!");
-    // Verify P1 Delegation
+     // Verify P1 Delegation
     console.log("Waiting for Player 1 Profile Permission...");
-    await waitUntilPermissionActive(provider.connection.rpcEndpoint, p1ProfilePda);
+    await robustWaitUntilPermissionActive(provider.connection, p1ProfilePda);
     console.log("Player 1 Profile Permission Active!");
 
     // Verify P2 Delegation
     console.log("Waiting for Player 2 Profile Permission...");
-    await waitUntilPermissionActive(provider.connection.rpcEndpoint, p2ProfilePda);
+    await robustWaitUntilPermissionActive(provider.connection, p2ProfilePda);
     console.log("Player 2 Profile Permission Active!");
-        const status = await getPermissionStatus(ephemeralRpcEndpoint, matchmakingStatePda);
-        console.log("Permission Status:", JSON.stringify(status, null, 2));
+    console.log("Player 2 Profile Permission Active!");
+        // const status = await getPermissionStatus(ephemeralRpcEndpoint, matchmakingStatePda);
+        // console.log("Permission Status:", JSON.stringify(status, null, 2));
      } else {
         throw new Error("Permissions for Matchmaking State failed to activate.");
      }
