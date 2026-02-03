@@ -5,12 +5,12 @@ use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs};
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
+use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accounts};
 
-declare_id!("3w8UKETTZtGv5cgBvyyuNv8EXPbfBPVXLYRqbjTMeSCu");
+declare_id!("ENUPVoY1BtRBkdY5TwNqbQmpeU2nrUdJvRkPRDRqUuMU");
 
-pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v3";
-pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile";
+pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v22";
+pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v22";
 
 #[ephemeral]
 #[program]
@@ -138,6 +138,8 @@ pub mod anchor_rock_paper_scissor {
 
     // 3️⃣ Reveal Winner (TEE -> L1)
     // Resolves ELO and removes game from internal state.
+    // Note: This instruction runs in the TEE to update the state.
+    // The COMMIT to L1 is deferred to the `persist_results` instruction called by the Relayer (Provider).
     pub fn reveal_winner(ctx: Context<RevealWinner>) -> Result<()> {
         let state = &mut ctx.accounts.matchmaking_state;
 
@@ -198,21 +200,34 @@ pub mod anchor_rock_paper_scissor {
         p1_state.try_serialize(&mut &mut p1_data[..])?;
         p2_state.try_serialize(&mut &mut p2_data[..])?;
 
+        // Drop mutable borrows to avoid RefCell error during commit
+        drop(p1_data);
+        drop(p2_data);
+
         // Remove game from state
         state.games.remove(game_idx);
 
-        // Commit everything (Disabled for L1 Verification)
-        // commit_and_undelegate_accounts(
-        //     &ctx.accounts.payer,
-        //     vec![
-        //         &ctx.accounts.matchmaking_state.to_account_info(),
-        //         &ctx.accounts.player1_profile.to_account_info(),
-        //         &ctx.accounts.player2_profile.to_account_info(),
-        //     ],
-        //     &ctx.accounts.magic_context.to_account_info(),
-        //     &ctx.accounts.magic_program.to_account_info(),
-        // )?;
+        // COMMIT IS SPLIT: `reveal_winner` updates TEE state. `persist_results` commits to L1.
+        // This avoids "Unauthorized Signer" error when players try to commit accounts they don't delegate.
 
+        Ok(())
+    }
+
+    // 4️⃣ Persist Results (L1 - Relayer Only)
+    // Commits the state changes from TEE to L1.
+    // This transaction must be signed by the Delegation Authority (Provider).
+    pub fn persist_results(ctx: Context<PersistResults>) -> Result<()> {
+        // Commit everything
+        commit_accounts(
+            &ctx.accounts.payer, // Authority/Payer (Provider)
+            vec![
+                &ctx.accounts.matchmaking_state.to_account_info(),
+                &ctx.accounts.player1_profile.to_account_info(),
+                &ctx.accounts.player2_profile.to_account_info(),
+            ],
+            &ctx.accounts.magic_context.to_account_info(),
+            &ctx.accounts.magic_program.to_account_info(),
+        )?;
         Ok(())
     }
 
@@ -222,6 +237,7 @@ pub mod anchor_rock_paper_scissor {
         let seeds_refs: Vec<&[u8]> = seed_data.iter().map(|s| s.as_slice()).collect();
 
         let validator = ctx.accounts.validator.as_ref().map(|v| v.key());
+
         ctx.accounts.delegate_pda(
             &ctx.accounts.payer,
             &seeds_refs,
@@ -303,13 +319,8 @@ pub struct InitializeMatchmaking<'info> {
 
 #[derive(Accounts)]
 pub struct Ready<'info> {
-    #[account(
-        mut,
-        seeds = [MATCHMAKING_STATE_SEED],
-        bump
-    )]
-    pub matchmaking_state: Account<'info, MatchmakingState>,
     #[account(mut)]
+    pub matchmaking_state: Account<'info, MatchmakingState>,
     pub player: Signer<'info>,
 }
 
@@ -321,7 +332,6 @@ pub struct MakeChoice<'info> {
         bump
     )]
     pub matchmaking_state: Account<'info, MatchmakingState>,
-    #[account(mut)]
     pub player: Signer<'info>,
 }
 
@@ -342,11 +352,26 @@ pub struct RevealWinner<'info> {
     /// Anyone can trigger this if game is done
     #[account(mut)]
     pub payer: Signer<'info>,
+}
 
-    /// CHECK: Magic
-    pub magic_context: AccountInfo<'info>,
-    /// CHECK: Magic
-    pub magic_program: AccountInfo<'info>,
+#[commit]
+#[derive(Accounts)]
+pub struct PersistResults<'info> {
+    /// CHECK: Delegated account owner is the Delegation Program, skipping Anchor owner check
+    #[account(mut, seeds = [MATCHMAKING_STATE_SEED], bump)]
+    pub matchmaking_state: UncheckedAccount<'info>,
+
+    /// CHECK: Manual serialization and verification
+    #[account(mut)]
+    pub player1_profile: AccountInfo<'info>,
+
+    /// CHECK: Manual serialization and verification
+    #[account(mut)]
+    pub player2_profile: AccountInfo<'info>,
+
+    /// Use Provider/Relayer as payer
+    #[account(mut)]
+    pub payer: Signer<'info>,
 }
 
 /// Unified delegate PDA context
@@ -356,6 +381,7 @@ pub struct DelegatePda<'info> {
     /// CHECK: The PDA to delegate
     #[account(mut, del)]
     pub pda: AccountInfo<'info>,
+    #[account(mut)]
     pub payer: Signer<'info>,
     /// CHECK: Checked by the delegate program
     pub validator: Option<AccountInfo<'info>>,

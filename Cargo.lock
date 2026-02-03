@@ -835,9 +835,9 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.8.0"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e297c23952d2d819d57c0d883a96ad3608d8d7518ee28ffc8bfa5a9c6a6febf"
+checksum = "4ad5420f7155a7ec229fce611fc7de99cfdc6b401098112590c34601bc37551c"
 dependencies = [
  "anchor-lang",
  "base64ct",
@@ -858,9 +858,9 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-action"
-version = "0.8.0"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fe4ffa05252c7fdcbb7d988aeaf6b994d1733f01a453da08fbbd68a947c3522"
+checksum = "8c648b6aeeb82590d2056e73356ec7a938e929140bea51f4cdfe917602cbbbf1"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -868,9 +868,9 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.8.0"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7fb0e49b21ab944937b118eeb8e26a157b21af821d8b258e27f9eaac287b835"
+checksum = "707c013bb3e6b87f17020667ae0906d5aa794837bdb2a40ea875937652e3e22b"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -878,9 +878,9 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.8.0"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48562329c3fbe3e8fb152e07fbc4a5b3abe804e157ecfc996d27082a651a08c6"
+checksum = "d29bfe18f04832972396fde12f4293590bd578f33bd38345148abf187c01128e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -889,9 +889,9 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
-version = "0.8.0"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5df9d12dfdd80be030c8b4143be6c8303d1047d7d36017f10d66f64a4c7d4b9"
+checksum = "f95f6e3f56fb565ef7ad2708f20fb6ec83dd28129e905cd2dd86bb5fda030569"
 dependencies = [
  "proc-macro2",
  "quote",
