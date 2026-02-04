@@ -1,6 +1,4 @@
 use anchor_lang::prelude::*;
-use private_matchmaking::cpi::accounts::JoinQueue;
-use private_matchmaking::program::PrivateMatchmaking;
 use private_matchmaking::Queue; 
 
 use ephemeral_rollups_sdk::anchor::{delegate, ephemeral, commit};
@@ -27,22 +25,7 @@ pub mod rps_game {
         Ok(())
     }
 
-    // 1️⃣ Join Queue (CPI to Matchmaker)
-    pub fn join_game_queue(ctx: Context<JoinGameQueue>) -> Result<()> {
-        let cpi_program = ctx.accounts.matchmaking_program.to_account_info();
-        let cpi_accounts = JoinQueue {
-            queue: ctx.accounts.queue.to_account_info(),
-            player_data: ctx.accounts.profile.to_account_info(), // The generic account
-            signer: ctx.accounts.player.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-        
-        // Call generic header
-        private_matchmaking::cpi::join_queue(cpi_ctx)?;
-        
-        msg!("Player joined matchmaking queue via CPI");
-        Ok(())
-    }
+
 
     // 2️⃣ Start Game (Triggered by Client after MatchFound)
     pub fn start_game(ctx: Context<StartGame>, game_id: u64, opponent: Pubkey) -> Result<()> {
@@ -137,15 +120,7 @@ pub struct InitializePlayer<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct JoinGameQueue<'info> {
-    #[account(mut)]
-    pub queue: Account<'info, Queue>, // From PrivateMatchmaking
-    #[account(mut)] // Mutable for ELO read lock?
-    pub profile: Account<'info, PlayerProfile>,
-    pub player: Signer<'info>,
-    pub matchmaking_program: Program<'info, PrivateMatchmaking>,
-}
+
 
 #[derive(Accounts)]
 #[instruction(game_id: u64, opponent: Pubkey)]

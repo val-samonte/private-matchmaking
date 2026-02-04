@@ -64,6 +64,12 @@ describe("architecture-refactor-verification", () => {
       return new anchor.Program(rpsGame.idl as any, p);
   }
 
+  async function getMatchmakingProgram(signer: Keypair): Promise<Program<PrivateMatchmaking>> {
+      const wallet = new anchor.Wallet(signer);
+      const p = new anchor.AnchorProvider(provider.connection, wallet, { commitment: "confirmed" });
+      return new anchor.Program(privateMatchmaking.idl as any, p);
+  }
+
   before("Setup and Fund", async () => {
     const payer = (provider.wallet as anchor.Wallet).payer;
     await sendAndConfirmTransaction(provider.connection, new Transaction().add(
@@ -78,6 +84,7 @@ describe("architecture-refactor-verification", () => {
       await privateMatchmaking.methods.initializeQueue({
           tenantProgramId: rpsGame.programId,
           eloOffset: 8 + 32, // Discriminator + Pubkey = 40. ELO is next 8 bytes.
+          eloWindow: new anchor.BN(100),
       }).accounts({
           authority: queueAuthority.publicKey,
       }).signers([queueAuthority]).rpc();
@@ -93,34 +100,31 @@ describe("architecture-refactor-verification", () => {
       console.log("Profiles Initialized");
   });
 
-  it("P1 Joins Queue (CPI)", async () => {
-      // P1 calls RPS::join_game_queue -> CPI -> PrivateMatchmaking::join_queue
-      const rpsP1 = await getTeeProgram(player1);
+  it("P1 Joins Queue (Client-Side)", async () => {
+      // P1 calls PrivateMatchmaking::join_queue DIRECTLY
+      const mmP1 = await getMatchmakingProgram(player1);
       
-          await rpsP1.methods.joinGameQueue().accounts({
-              queue: queuePda,
-              profile: p1ProfilePda,
-          }).rpc();
-          console.log("P1 Joined Queue via CPI");
+      await mmP1.methods.joinQueue().accounts({
+          queue: queuePda,
+          playerData: p1ProfilePda,
+          signer: player1.publicKey,
+      }).rpc();
+      console.log("P1 Joined Queue via Client");
       
       // Verify State
       const queueAccount = await privateMatchmaking.account.queue.fetch(queuePda);
       assert.equal(queueAccount.entries.length, 1);
-      assert.equal(queueAccount.entries[0].player.toString(), p1ProfilePda.toString()); // Entry uses Profile Key?
-      // Wait, in rps-game lib.rs JoinGameQueue:
-      // cpi_accounts = JoinQueue { queue, player_data: profile, signer: player }
-      // private-matchmaking lib.rs:
-      // entry.player = ctx.accounts.player_data.key()
-      // Yes, it stores the Profile Key.
+      assert.equal(queueAccount.entries[0].player.toString(), p1ProfilePda.toString());
   });
 
   it("P2 Joins Queue and Matches", async () => {
-      const rpsP2 = await getTeeProgram(player2);
-      await rpsP2.methods.joinGameQueue().accounts({
+      const mmP2 = await getMatchmakingProgram(player2);
+      await mmP2.methods.joinQueue().accounts({
           queue: queuePda,
-          profile: p2ProfilePda,
+          playerData: p2ProfilePda,
+          signer: player2.publicKey,
       }).rpc();
-       console.log("P2 Joined Queue via CPI");
+       console.log("P2 Joined Queue via Client");
        
       let queueAccount = await privateMatchmaking.account.queue.fetch(queuePda);
       assert.equal(queueAccount.entries.length, 2);

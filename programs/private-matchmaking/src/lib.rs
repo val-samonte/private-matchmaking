@@ -13,9 +13,14 @@ pub mod private_matchmaking {
         queue.authority = ctx.accounts.authority.key();
         queue.tenant_program_id = config.tenant_program_id;
         queue.elo_offset = config.elo_offset;
+        queue.elo_window = config.elo_window;
         queue.bump = ctx.bumps.queue;
 
-        msg!("Queue Initialized for Tenant: {}", config.tenant_program_id);
+        msg!(
+            "Queue Initialized for Tenant: {} (Window: {})",
+            config.tenant_program_id,
+            config.elo_window
+        );
         Ok(())
     }
 
@@ -60,13 +65,52 @@ pub mod private_matchmaking {
 
     pub fn process_match(ctx: Context<ProcessMatch>) -> Result<()> {
         let queue = &mut ctx.accounts.queue;
+        let window = queue.elo_window;
+
+        let mut match_found = None;
+        let mut remove_indices = None;
+
+        // Simple O(N^2) or just checking head against others?
+        // For simplicity: Check Head against all others. If match, pop both.
+        // Since we are ephemeral, we can hold state in memory or just sort.
+        // Let's assume queue is relatively small (100).
+
         if queue.entries.len() >= 2 {
-            let p1 = queue.entries.pop().unwrap();
-            let p2 = queue.entries.pop().unwrap();
-            msg!("Match Found: {} vs {}", p1.player, p2.player);
-            // In a real system, we would write this to a "MatchResult" account or emit an event
-            // For MVP, the log serves as the Proof of Match for the client
+            // Try to find a match for the first player
+            let p1 = queue.entries[0];
+
+            for i in 1..queue.entries.len() {
+                let p2 = queue.entries[i];
+                let diff = if p1.elo > p2.elo {
+                    p1.elo - p2.elo
+                } else {
+                    p2.elo - p1.elo
+                };
+
+                if diff <= window {
+                    match_found = Some((p1, p2));
+                    remove_indices = Some((0, i));
+                    break;
+                }
+            }
         }
+
+        if let Some((indices)) = remove_indices {
+            // Remove higher index first to not shift lower index
+            queue.entries.remove(indices.1);
+            queue.entries.remove(indices.0);
+
+            if let Some((p1, p2)) = match_found {
+                msg!(
+                    "Match Found: {} (ELO {}) vs {} (ELO {})",
+                    p1.player,
+                    p1.elo,
+                    p2.player,
+                    p2.elo
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -109,6 +153,7 @@ pub struct Queue {
     pub authority: Pubkey,
     pub tenant_program_id: Pubkey,
     pub elo_offset: u32,
+    pub elo_window: u64,
     pub bump: u8,
     pub entries: Vec<QueueEntry>,
 }
@@ -128,6 +173,7 @@ pub struct QueueEntry {
 pub struct QueueConfig {
     pub tenant_program_id: Pubkey,
     pub elo_offset: u32,
+    pub elo_window: u64,
 }
 
 #[error_code]
