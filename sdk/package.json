@@ -2,6 +2,10 @@
   "name": "@1upmonster/duel",
   "version": "0.1.0",
   "description": "SDK for Private Matchmaking on Solana",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/val-samonte/private-matchmaking"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
