@@ -70,6 +70,33 @@ pub mod rps_game {
                 _ => GameResult::Tie,
              };
              msg!("Game Result: {:?}", session.result);
+
+             // Update ELO
+             if let GameResult::Winner(winner) = session.result {
+                 let p1_profile = &mut ctx.accounts.player1_profile;
+                 let p2_profile = &mut ctx.accounts.player2_profile;
+                 
+                 // Simple ELO: Winner +10, Loser -10
+                 if winner == session.player1 {
+                     p1_profile.elo = p1_profile.elo.saturating_add(10);
+                     p2_profile.elo = p2_profile.elo.saturating_sub(10);
+                     p1_profile.games_won += 1;
+                 } else {
+                     p1_profile.elo = p1_profile.elo.saturating_sub(10);
+                     p2_profile.elo = p2_profile.elo.saturating_add(10);
+                     p2_profile.games_won += 1;
+                 }
+                 p1_profile.games_played += 1;
+                 p2_profile.games_played += 1;
+                 
+                 msg!("ELO Updated: P1 ({}), P2 ({})", p1_profile.elo, p2_profile.elo);
+             } else if let GameResult::Tie = session.result {
+                 let p1_profile = &mut ctx.accounts.player1_profile;
+                 let p2_profile = &mut ctx.accounts.player2_profile;
+                 p1_profile.games_played += 1;
+                 p2_profile.games_played += 1;
+                 msg!("Game Tied - No ELO Change");
+             }
         }
         Ok(())
     }
@@ -144,6 +171,10 @@ pub struct StartGame<'info> {
 pub struct MakeChoice<'info> {
     #[account(mut)]
     pub game_session: Account<'info, GameSession>,
+    #[account(mut, seeds = [PLAYER_PROFILE_SEED, game_session.player1.as_ref()], bump)]
+    pub player1_profile: Account<'info, PlayerProfile>,
+    #[account(mut, seeds = [PLAYER_PROFILE_SEED, game_session.player2.as_ref()], bump)]
+    pub player2_profile: Account<'info, PlayerProfile>,
     pub player: Signer<'info>,
 }
 
