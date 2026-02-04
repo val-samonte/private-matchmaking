@@ -2,49 +2,15 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { RpsGame } from "../target/types/rps_game";
 import { PrivateMatchmaking } from "../target/types/private_matchmaking";
-import { Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { getAuthToken, createDelegatePermissionInstruction, permissionPdaFromAccount, AUTHORITY_FLAG, TX_LOGS_FLAG, waitUntilPermissionActive, getPermissionStatus, MAGIC_PROGRAM_ID, MAGIC_CONTEXT_ID, DEFAULT_PRIVATE_VALIDATOR, DELEGATION_PROGRAM_ID, createCloseEscrowInstruction } from "@magicblock-labs/ephemeral-rollups-sdk";
-import * as nacl from "tweetnacl";
+import { Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
+
 import { assert } from "chai";
 
 // ... (Helper functions getAuthTokenManual, robustWaitUntilPermissionActive from previous test) ...
 // For brevity, I will assume the environment usually has them or I will re-include minimal versions if needed.
 // I'll paste the full content.
 
-// Authorization Interfaces
-interface ChallengeResponse {
-    challenge: string;
-}
 
-interface AuthResponse {
-    token: string;
-}
-
-async function getAuthTokenManual(rpcUrl: string, publicKey: PublicKey, signMessage: (msg: Uint8Array) => Promise<Uint8Array>): Promise<{ token: string, expiresAt: number }> {
-    const bs58 = require("bs58");
-    const fetch = global.fetch; 
-    const baseUrl = rpcUrl.endsWith("/") ? rpcUrl.slice(0, -1) : rpcUrl;
-    const challengeUrl = `${baseUrl}/auth/challenge?pubkey=${publicKey.toString()}`;
-    // ... same as before ...
-    // Simplified for this write:
-    try {
-        const res = await fetch(challengeUrl);
-        const json = await res.json() as ChallengeResponse;
-        const { challenge } = json;
-        const signature = await signMessage(new Uint8Array(Buffer.from(challenge, "utf-8")));
-        const loginUrl = `${baseUrl}/auth/login`;
-        const authRes = await fetch(loginUrl, {
-             method: "POST",
-             headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ pubkey: publicKey.toString(), challenge, signature: bs58.encode(signature) })
-        });
-        const authJson = await authRes.json() as AuthResponse;
-        return { token: authJson.token, expiresAt: Date.now() + 100000 };
-    } catch(e) {
-        console.error("Auth helper error:", e);
-        throw e;
-    }
-}
 
 
 describe("architecture-refactor-verification", () => {
