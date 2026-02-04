@@ -1,20 +1,39 @@
 # Duel - Private Matchmaking on Solana
 
-**Duel** (formerly Private Matchmaking) is a privacy-focused matchmaking protocol built on Solana using MagicBlock's Ephemeral Rollups (TEE). It allows players to queue for games without revealing their ELO or intentions to the public chain until a match is found.
+A complete privacy-focused matchmaking protocol built on Solana using MagicBlock's Ephemeral Rollups (TEE). This repository contains the on-chain programs, TypeScript SDK, and reference game implementation.
+
+## What's Inside
+
+This is a **monorepo** containing:
+
+1. **Anchor Programs** (`programs/`)
+   - `duel`: Core matchmaking protocol with TEE privacy
+   - `rps-game`: Reference Rock-Paper-Scissors game implementation
+   
+2. **TypeScript SDK** (`sdk/`)
+   - Published as `@1upmonster/duel` on NPM
+   - Client library for game owners and players
+   
+3. **Integration Tests** (`tests/`)
+   - Full end-to-end test suite demonstrating the complete flow
 
 ## Features
 
-*   **Privacy-First:** Player ELO and queue status are hidden within a Trusted Execution Environment (TEE).
-*   **Provable Fairness:** Matches are processed securely off-chain, with results settled on-chain.
-*   **Delegated Authority:** Game owners delegate matchmaking to verified TEE validators.
-*   **Cross-Program Integration:** Designed to work with arbitrary game programs (e.g., Rock Paper Scissors).
+*   **Privacy-First:** Player ELO and queue status are hidden within a Trusted Execution Environment (TEE)
+*   **Client-Side Joining:** Players join queues directly from their wallets (no CPI required)
+*   **Automatic Matching:** TEE processes matches based on configurable ELO windows
+*   **Provable Fairness:** Matches are processed securely off-chain, with results settled on-chain
+*   **Game Agnostic:** Designed to work with any game program
 
 ## Architecture
 
-The project consists of three main components:
+### Programs
 
 1.  **Duel Program (`programs/duel`)**: The core matchmaking logic. It manages Tenants (game developers) and Queues. It runs as an Ephemeral Rollup for privacy.
 2.  **RPS Game (`programs/rps-game`)**: A reference implementation of a game using Duel. It demonstrates how a game program validates matched players and handles results.
+
+### SDK
+
 3.  **SDK (`@1upmonster/duel`)**: A TypeScript client SDK that allows players to join queues directly from their wallets (no CPI required).
 
 ### How It Works
@@ -23,57 +42,66 @@ The project consists of three main components:
 2.  **Matching**: The TEE automatically processes matches based on ELO windows
 3.  **Game Integration**: Once matched, players interact with the game program (e.g., RPS Game)
 
-## Prerequisities
+## Prerequisites
 
 *   [Solana Tool Suite](https://docs.solana.com/cli/install-solana-cli-tools)
-*   [Anchor Framework](https://www.anchor-lang.com/)
-*   [Node.js](https://nodejs.org/) & [Yarn](https://yarnpkg.com/)
+*   [Anchor Framework](https://www.anchor-lang.com/) v0.32.1+
+*   [Node.js](https://nodejs.org/) v16+ & [Yarn](https://yarnpkg.com/)
 
-## Installation
+## Development Setup
 
-### SDK
-To use the SDK in your client application:
+### 1. Clone and Install
+
+```bash
+git clone https://github.com/val-samonte/private-matchmaking.git
+cd private-matchmaking
+yarn install
+cd sdk && npm install && cd ..
+```
+
+### 2. Build Programs
+
+```bash
+anchor build
+```
+
+This compiles both the `duel` and `rps-game` programs.
+
+### 3. Run Tests
+
+```bash
+anchor test
+```
+
+The test suite demonstrates:
+- Tenant and queue initialization
+- TEE delegation
+- Player queue joining (client-side)
+- Automatic matching in TEE
+- Game session creation and play
+- Privacy verification (L1 vs TEE visibility)
+
+### 4. Build SDK
+
+```bash
+cd sdk
+npm run build
+```
+
+## Using the SDK
+
+### Installation
 
 ```bash
 npm install @1upmonster/duel
 ```
 
-### Local Development
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/val-samonte/private-matchmaking.git
-    cd private-matchmaking
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    yarn install
-    cd sdk && npm install
-    ```
-
-3.  **Build the programs:**
-    ```bash
-    anchor build
-    ```
-
-4.  **Run Tests:**
-    ```bash
-    anchor test
-    ```
-
-## Usage (SDK)
-
-The SDK provides two main classes for interaction.
-
-### for Game Owners (`MatchmakingAdmin`)
-
-Initialize your game's matchmaking infrastructure.
+### For Game Owners
 
 ```typescript
 import { MatchmakingAdmin } from "@1upmonster/duel";
 
-const admin = new MatchmakingAdmin(provider, programId);
+const admin = new MatchmakingAdmin(provider);
 
 // 1. Initialize Tenant for your Game Program
 // Args: authority, tenantProgramId, eloWindow (default 100), eloOffset (default 40)
@@ -86,18 +114,39 @@ await admin.initializeQueue(authority, tenantPda);
 await admin.delegateQueue(authority, validatorPubkey);
 ```
 
-### for Players (`MatchmakingPlayer`)
-
-Allow players to join the private queue.
+### For Players
 
 ```typescript
 import { MatchmakingPlayer } from "@1upmonster/duel";
 
-const player = new MatchmakingPlayer(provider, programId);
+const player = new MatchmakingPlayer(provider);
 
 // Join the private queue
 // Note: Actual matching happens automatically inside the TEE
 await player.joinQueue(queuePda, tenantPda, playerProfilePda);
+```
+
+## Repository Structure
+
+```
+.
+├── programs/
+│   ├── duel/              # Core matchmaking program
+│   │   ├── src/lib.rs     # Main program logic
+│   │   └── Cargo.toml
+│   └── rps-game/          # Reference game implementation
+│       ├── src/lib.rs
+│       └── Cargo.toml
+├── sdk/                   # TypeScript SDK (@1upmonster/duel)
+│   ├── src/
+│   │   ├── admin.ts       # Admin/owner functionality
+│   │   ├── player.ts      # Player functionality
+│   │   └── types.ts       # Generated types
+│   └── package.json
+├── tests/
+│   └── auto-match.ts      # Integration tests
+├── Anchor.toml            # Anchor configuration
+└── README.md              # This file
 ```
 
 ## Contributing
@@ -107,3 +156,4 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 ## License
 
 [MIT](LICENSE)
+
