@@ -2,10 +2,12 @@
 resolution = true
 skip-lint = false
 
-anchor_rock_paper_scissor = "ENUPVoY1BtRBkdY5TwNqbQmpeU2nrUdJvRkPRDRqUuMU"
+rps_game = "BHyvePEQRUKrvC56K1Pdx3Q21okoy1knoCsdQmnMavHN"
+private_matchmaking = "sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz"
 
 [programs.localnet]
-anchor_rock_paper_scissor = "xc7RtasEqM2YNaRSiFfiMGKrHM6EjbbcGLK4b2fzjhb"
+rps_game = "BHyvePEQRUKrvC56K1Pdx3Q21okoy1knoCsdQmnMavHN"
+private_matchmaking = "sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz"
 
 [registry]
 url = "https://api.devnet.solana.com"
