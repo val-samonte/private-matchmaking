@@ -15,7 +15,8 @@ import {
   getAuthToken,
   waitUntilPermissionActive,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
-import * as nacl from "tweetnacl"; // Ensure this is installed or use web3 keypair
+import * as nacl from "tweetnacl";
+import { MatchmakingClient } from "../app/client/src";
 
 describe("architecture-refactor-verification", () => {
   const provider = anchor.AnchorProvider.env();
@@ -116,39 +117,33 @@ describe("architecture-refactor-verification", () => {
 
   it("Initialize Infrastructure (Tenant & Queue) & Delegate", async () => {
       // 1. Initialize Tenant
-      await sendAndConfirmRobust(
-          privateMatchmaking,
-          privateMatchmaking.methods.initializeTenant(
-            rpsGame.programId,
-            8 + 32, // Discriminator + Pubkey
-            new anchor.BN(100)
-          ).accountsPartial({
-              authority: queueAuthority.publicKey,
-          }).transaction(),
+      const clientL1 = new MatchmakingClient(provider, privateMatchmaking.programId);
+
+      // 1. Initialize Tenant
+      await clientL1.initializeTenant(
+          queueAuthority.publicKey, 
+          rpsGame.programId, 
+          100, 
+          8 + 32,
+          undefined,
           [queueAuthority]
       );
       console.log("Tenant Initialized");
 
-      // 2. Initialize Queue (Linked to Tenant)
-      await sendAndConfirmRobust(
-          privateMatchmaking,
-          privateMatchmaking.methods.initializeQueue().accountsPartial({
-              tenant: tenantPda,
-              authority: queueAuthority.publicKey,
-          }).transaction(),
+      // 2. Initialize Queue
+      await clientL1.initializeQueue(
+          queueAuthority.publicKey,
+          tenantPda,
+          undefined,
           [queueAuthority]
       );
-      
-      // Delegate Queue to TEE (Dark Pool Mode)
-      // Use standard provider to call delegate on L1
-      await sendAndConfirmRobust(
-          privateMatchmaking,
-          privateMatchmaking.methods.delegateQueue({ queue: { authority: queueAuthority.publicKey } as any }).accounts({
-              pda: queuePda,
-              payer: queueAuthority.publicKey,
-              validator: ER_VALIDATOR, // Use Reference Validator
-          } as any).transaction(),
-          [queueAuthority] 
+
+      // 3. Delegate Queue
+      await clientL1.delegateQueue(
+          queueAuthority.publicKey,
+          ER_VALIDATOR,
+          undefined,
+          [queueAuthority]
       );
       
       console.log("Queue Initialized & Delegated (Dark Pool Active)");
@@ -273,13 +268,8 @@ describe("architecture-refactor-verification", () => {
       // Use TEE Provider
       const mmP1 = await getMatchmakingProgram(player1, providerTeePlayer1);
       
-      // We must use the TEE Provider to send this, because the Queue is in TEE.
-      await sendAndConfirmRobust(mmP1, mmP1.methods.joinQueue().accounts({
-          queue: queuePda,
-          tenant: tenantPda,
-          playerData: p1ProfilePda,
-          signer: player1.publicKey,
-      }).transaction(), [player1]);
+      const clientP1 = new MatchmakingClient(providerTeePlayer1, privateMatchmaking.programId);
+      await clientP1.joinQueue(queuePda, tenantPda, p1ProfilePda);
 
       console.log("P1 Joined Queue via Client");
       
@@ -310,12 +300,8 @@ describe("architecture-refactor-verification", () => {
   it("P2 Joins Queue and Matches", async () => {
       const mmP2 = await getMatchmakingProgram(player2, providerTeePlayer2);
       
-      await sendAndConfirmRobust(mmP2, mmP2.methods.joinQueue().accounts({
-          queue: queuePda,
-          tenant: tenantPda,
-          playerData: p2ProfilePda,
-          signer: player2.publicKey,
-      }).transaction(), [player2]);
+      const clientP2 = new MatchmakingClient(providerTeePlayer2, privateMatchmaking.programId);
+      await clientP2.joinQueue(queuePda, tenantPda, p2ProfilePda);
 
       console.log("P2 Joined Queue via Client");
 
@@ -325,15 +311,8 @@ describe("architecture-refactor-verification", () => {
 
       // Process Match SHOULD be done by an Authority (e.g. queueAuthority or separate matcher)
       // Here we use queueAuthority with TEE Provider
-      const mmAuth = await getMatchmakingProgram(queueAuthority, providerTeeQueueAuth);
-      await sendAndConfirmRobust(
-          mmAuth,
-          mmAuth.methods.processMatch().accountsPartial({
-              queue: queuePda,
-              tenant: tenantPda,
-          }).transaction(),
-          [queueAuthority]
-      ); 
+      const clientAuth = new MatchmakingClient(providerTeeQueueAuth, privateMatchmaking.programId);
+      await clientAuth.processMatch(queuePda, tenantPda); 
 
       console.log("Match Processed (TEE)");
 
