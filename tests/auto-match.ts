@@ -122,10 +122,8 @@ describe("architecture-refactor-verification", () => {
             rpsGame.programId,
             8 + 32, // Discriminator + Pubkey
             new anchor.BN(100)
-          ).accounts({
-              tenant: tenantPda,
+          ).accountsPartial({
               authority: queueAuthority.publicKey,
-              systemProgram: SystemProgram.programId,
           }).transaction(),
           [queueAuthority]
       );
@@ -134,11 +132,9 @@ describe("architecture-refactor-verification", () => {
       // 2. Initialize Queue (Linked to Tenant)
       await sendAndConfirmRobust(
           privateMatchmaking,
-          privateMatchmaking.methods.initializeQueue().accounts({
-              queue: queuePda,
+          privateMatchmaking.methods.initializeQueue().accountsPartial({
               tenant: tenantPda,
               authority: queueAuthority.publicKey,
-              systemProgram: SystemProgram.programId,
           }).transaction(),
           [queueAuthority]
       );
@@ -332,10 +328,9 @@ describe("architecture-refactor-verification", () => {
       const mmAuth = await getMatchmakingProgram(queueAuthority, providerTeeQueueAuth);
       await sendAndConfirmRobust(
           mmAuth,
-          mmAuth.methods.processMatch().accounts({
+          mmAuth.methods.processMatch().accountsPartial({
               queue: queuePda,
               tenant: tenantPda,
-              authority: queueAuthority.publicKey, 
           }).transaction(),
           [queueAuthority]
       ); 
