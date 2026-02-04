@@ -118,6 +118,42 @@ pub mod duel {
             entry.player,
             ctx.accounts.queue.entries.len()
         );
+
+        // 4. Automatically process matches after adding player
+        let queue = &mut ctx.accounts.queue;
+        let window = ctx.accounts.tenant.elo_window;
+
+        if queue.entries.len() >= 2 {
+            let new_player_idx = queue.entries.len() - 1;
+            let new_player = queue.entries[new_player_idx];
+
+            // Try to find a match for the newly added player
+            for i in 0..new_player_idx {
+                let other_player = queue.entries[i];
+                let diff = if new_player.elo > other_player.elo {
+                    new_player.elo - other_player.elo
+                } else {
+                    other_player.elo - new_player.elo
+                };
+
+                if diff <= window {
+                    // Match found!
+                    msg!(
+                        "Auto-Match Found: {} (ELO {}) vs {} (ELO {})",
+                        new_player.player,
+                        new_player.elo,
+                        other_player.player,
+                        other_player.elo
+                    );
+
+                    // Remove both players from queue (remove higher index first)
+                    queue.entries.remove(new_player_idx);
+                    queue.entries.remove(i);
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 
