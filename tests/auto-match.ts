@@ -168,7 +168,7 @@ describe("architecture-refactor-verification", () => {
 
       // P1 Moves (Rock)
       // Enum: Rock=0, Paper=1, Scissors=2
-      await rpsP1.methods.makeChoice({ rock: {} }).accounts({
+      await rpsP1.methods.makeChoice({ rock: {} }).accountsPartial({
           gameSession: gameSessionPda,
           player1Profile: p1ProfilePda,
           player2Profile: p2ProfilePda,
@@ -178,7 +178,7 @@ describe("architecture-refactor-verification", () => {
 
       // P2 Moves (Paper)
       const rpsP2 = await getTeeProgram(player2);
-      await rpsP2.methods.makeChoice({ paper: {} }).accounts({
+      await rpsP2.methods.makeChoice({ paper: {} }).accountsPartial({
           gameSession: gameSessionPda,
           player1Profile: p1ProfilePda,
           player2Profile: p2ProfilePda,
