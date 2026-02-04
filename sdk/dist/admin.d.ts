@@ -26,8 +26,4 @@ export declare class MatchmakingAdmin {
      * Delegate Queue to TEE
      */
     delegateQueue(authority: PublicKey, validator?: PublicKey, confirmOptions?: ConfirmOptions, signers?: Keypair[]): Promise<TransactionSignature>;
-    /**
-     * Process Match (Admin/Maintenance)
-     */
-    processMatch(queue: PublicKey, tenant: PublicKey, confirmOptions?: ConfirmOptions, signers?: Keypair[]): Promise<TransactionSignature>;
 }

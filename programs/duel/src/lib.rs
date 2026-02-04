@@ -156,63 +156,6 @@ pub mod duel {
 
         Ok(())
     }
-
-    pub fn process_match(ctx: Context<ProcessMatch>) -> Result<()> {
-        let queue = &mut ctx.accounts.queue;
-        let window = ctx.accounts.tenant.elo_window;
-
-        let mut match_found = None;
-        let mut remove_indices = None;
-
-        if queue.entries.len() >= 2 {
-            let p1 = queue.entries[0];
-
-            for i in 1..queue.entries.len() {
-                let p2 = queue.entries[i];
-                let diff = if p1.elo > p2.elo {
-                    p1.elo - p2.elo
-                } else {
-                    p2.elo - p1.elo
-                };
-
-                if diff <= window {
-                    match_found = Some((p1, p2));
-                    remove_indices = Some((0, i));
-                    break;
-                }
-            }
-        }
-
-        if let Some((indices)) = remove_indices {
-            queue.entries.remove(indices.1);
-            queue.entries.remove(indices.0);
-
-            if let Some((p1, p2)) = match_found {
-                msg!(
-                    "Match Found: {} (ELO {}) vs {} (ELO {})",
-                    p1.player,
-                    p1.elo,
-                    p2.player,
-                    p2.elo
-                );
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Accounts)]
-pub struct ProcessMatch<'info> {
-    #[account(mut)]
-    pub queue: Account<'info, Queue>,
-    #[account(
-        has_one = authority,
-        constraint = queue.tenant == tenant.key() @ MatchmakingError::InvalidTenant
-    )]
-    pub tenant: Account<'info, Tenant>,
-    /// CHECK: Authority
-    pub authority: Signer<'info>,
 }
 
 #[derive(Accounts)]

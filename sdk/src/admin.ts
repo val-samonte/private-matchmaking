@@ -129,23 +129,5 @@ export class MatchmakingAdmin {
         .signers(signers)
         .rpc(confirmOptions);
   }
-
-  /**
-   * Process Match (Admin/Maintenance)
-   */
-  async processMatch(
-    queue: PublicKey,
-    tenant: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = [] // Admin might sign if authority required
-  ): Promise<TransactionSignature> {
-    return await this.program.methods
-      .processMatch()
-      .accountsPartial({
-        queue: queue,
-        tenant: tenant,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
-  }
 }
+

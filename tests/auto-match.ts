@@ -301,19 +301,11 @@ describe("architecture-refactor-verification", () => {
 
       console.log("P2 Joined Queue via Client");
 
+
+
+      // Match should be automatically processed when P2 joined
       let queueAccount = await mmP2.account.queue.fetch(queuePda);
-      console.log("Queue Entries (Before Match):", queueAccount.entries.length);
-      assert.equal(queueAccount.entries.length, 2);
-
-      // Process Match SHOULD be done by an Authority (e.g. queueAuthority or separate matcher)
-      // Here we use queueAuthority with TEE Provider
-      const clientAuth = new MatchmakingAdmin(providerTeeQueueAuth, privateMatchmaking.programId);
-      await clientAuth.processMatch(queuePda, tenantPda); 
-
-      console.log("Match Processed (TEE)");
-
-      queueAccount = await mmP2.account.queue.fetch(queuePda);
-      console.log("Queue Entries (After Match):", queueAccount.entries.length);
+      console.log("Queue Entries (After Auto-Match):", queueAccount.entries.length);
       assert.equal(queueAccount.entries.length, 0);
   });
 

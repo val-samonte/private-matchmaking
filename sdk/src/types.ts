@@ -340,36 +340,6 @@ export type Duel = {
       "args": []
     },
     {
-      "name": "processMatch",
-      "discriminator": [
-        139,
-        58,
-        77,
-        101,
-        46,
-        54,
-        202,
-        140
-      ],
-      "accounts": [
-        {
-          "name": "queue",
-          "writable": true
-        },
-        {
-          "name": "tenant"
-        },
-        {
-          "name": "authority",
-          "signer": true,
-          "relations": [
-            "tenant"
-          ]
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "processUndelegation",
       "discriminator": [
         196,
