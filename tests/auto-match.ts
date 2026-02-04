@@ -20,8 +20,7 @@ describe("architecture-refactor-verification", () => {
   const rpsGame = anchor.workspace.RpsGame as Program<RpsGame>;
   const privateMatchmaking = anchor.workspace.PrivateMatchmaking as Program<PrivateMatchmaking>;
 
-  const MAGIC_CONTEXT_DEVNET = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
-  const ephemeralRpcEndpoint = "https://tee.magicblock.app/";
+
 
   // Accounts
   const queueSeed = Buffer.from("queue");
@@ -48,7 +47,7 @@ describe("architecture-refactor-verification", () => {
     rpsGame.programId
   );
 
-  let teeRpsInfo: { program: Program<RpsGame>, provider: anchor.AnchorProvider };
+
 
   // Helper to get TEE Provider
   async function getTeeProgram(signer: Keypair): Promise<Program<RpsGame>> {
