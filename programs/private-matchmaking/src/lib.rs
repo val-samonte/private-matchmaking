@@ -9,19 +9,27 @@ declare_id!("sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz");
 pub mod private_matchmaking {
     use super::*;
 
-    pub fn initialize_queue(ctx: Context<InitializeQueue>, config: QueueConfig) -> Result<()> {
+    pub fn initialize_tenant(
+        ctx: Context<InitializeTenant>,
+        tenant_program_id: Pubkey,
+        elo_offset: u32,
+        elo_window: u64,
+    ) -> Result<()> {
+        let tenant = &mut ctx.accounts.tenant;
+        tenant.authority = ctx.accounts.authority.key();
+        tenant.tenant_program_id = tenant_program_id;
+        tenant.elo_offset = elo_offset;
+        tenant.elo_window = elo_window;
+        msg!("Tenant Initialized for Program: {}", tenant_program_id);
+        Ok(())
+    }
+
+    pub fn initialize_queue(ctx: Context<InitializeQueue>) -> Result<()> {
         let queue = &mut ctx.accounts.queue;
         queue.authority = ctx.accounts.authority.key();
-        queue.tenant_program_id = config.tenant_program_id;
-        queue.elo_offset = config.elo_offset;
-        queue.elo_window = config.elo_window;
+        queue.tenant = ctx.accounts.tenant.key();
         queue.bump = ctx.bumps.queue;
-
-        msg!(
-            "Queue Initialized for Tenant: {} (Window: {})",
-            config.tenant_program_id,
-            config.elo_window
-        );
+        msg!("Queue Initialized linked to Tenant: {}", queue.tenant);
         Ok(())
     }
 
@@ -44,34 +52,26 @@ pub mod private_matchmaking {
     pub fn join_queue(ctx: Context<JoinQueue>) -> Result<()> {
         // 1. Verify Tenant
         let player_account_info = &ctx.accounts.player_data;
-        // Verify owner is either the Tenant OR the Delegation Program (if delegated)
-        // We can check if it's the expected program or the delegation program ID
-        // For simplicity in this PoC, we check against Tenant. If it fails, we check if it's a known delegation program?
-        // Or we just allow it if we are in TEE?
-        // In TEE, the 'owner' field might strictly be the delegation program.
-        // Let's print the owner for debug and allow if it matches strict logic.
-
         let owner = player_account_info.owner;
-        let tenant = &ctx.accounts.queue.tenant_program_id;
+        let tenant_program_id = &ctx.accounts.tenant.tenant_program_id;
 
         // This PID is the MagicBlock Delegation Program ID on Devnet usually
         // But better to not hardcode.
         // For now, we allow if owner == tenant OR owner != system_program (weak check).
-        // Let's try to just Log it and relax for PoC if logic matches.
 
-        if owner != tenant {
+        if owner != tenant_program_id {
             msg!(
                 "Warning: Owner ({}) != Tenant ({}). Assuming Delegated Account.",
                 owner,
-                tenant
+                tenant_program_id
             );
             // Verify it is NOT the System Program (000...)
             require!(owner != &System::id(), MatchmakingError::InvalidTenant);
         }
 
-        // 2. Read ELO ( Generic)
+        // 2. Read ELO (Generic)
         let data = player_account_info.try_borrow_data()?;
-        let offset = ctx.accounts.queue.elo_offset as usize;
+        let offset = ctx.accounts.tenant.elo_offset as usize;
 
         if data.len() < offset + 8 {
             return err!(MatchmakingError::DataTooSmall);
@@ -100,7 +100,7 @@ pub mod private_matchmaking {
 
     pub fn process_match(ctx: Context<ProcessMatch>) -> Result<()> {
         let queue = &mut ctx.accounts.queue;
-        let window = queue.elo_window;
+        let window = ctx.accounts.tenant.elo_window;
 
         let mut match_found = None;
         let mut remove_indices = None;
@@ -147,8 +147,28 @@ pub mod private_matchmaking {
 pub struct ProcessMatch<'info> {
     #[account(mut)]
     pub queue: Account<'info, Queue>,
+    #[account(
+        has_one = authority,
+        constraint = queue.tenant == tenant.key() @ MatchmakingError::InvalidTenant
+    )]
+    pub tenant: Account<'info, Tenant>,
     /// CHECK: Authority
     pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeTenant<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + Tenant::LEN,
+        seeds = [b"tenant", authority.key().as_ref()],
+        bump
+    )]
+    pub tenant: Account<'info, Tenant>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -161,6 +181,10 @@ pub struct InitializeQueue<'info> {
         bump
     )]
     pub queue: Account<'info, Queue>,
+    #[account(
+        constraint = tenant.authority == authority.key() @ MatchmakingError::Unauthorized
+    )]
+    pub tenant: Account<'info, Tenant>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -182,6 +206,10 @@ pub struct DelegateQueue<'info> {
 pub struct JoinQueue<'info> {
     #[account(mut)]
     pub queue: Account<'info, Queue>,
+    #[account(
+        constraint = queue.tenant == tenant.key() @ MatchmakingError::InvalidTenant
+    )]
+    pub tenant: Account<'info, Tenant>,
     /// CHECK: We inspect the owner and data manually.
     #[account(mut)]
     pub player_data: AccountInfo<'info>,
@@ -191,11 +219,21 @@ pub struct JoinQueue<'info> {
 #[account]
 pub struct Queue {
     pub authority: Pubkey,
+    pub tenant: Pubkey,
+    pub bump: u8,
+    pub entries: Vec<QueueEntry>,
+}
+
+#[account]
+pub struct Tenant {
+    pub authority: Pubkey,
     pub tenant_program_id: Pubkey,
     pub elo_offset: u32,
     pub elo_window: u64,
-    pub bump: u8,
-    pub entries: Vec<QueueEntry>,
+}
+
+impl Tenant {
+    pub const LEN: usize = 32 + 32 + 4 + 8;
 }
 
 impl Queue {
@@ -221,6 +259,8 @@ pub enum MatchmakingError {
     InvalidTenant,
     #[msg("Account data too small for ELO read")]
     DataTooSmall,
+    #[msg("Unauthorized access")]
+    Unauthorized,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

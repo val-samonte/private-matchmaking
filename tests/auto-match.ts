@@ -41,6 +41,12 @@ describe("architecture-refactor-verification", () => {
     privateMatchmaking.programId
   );
 
+  const tenantSeed = Buffer.from("tenant");
+  const [tenantPda] = PublicKey.findProgramAddressSync(
+    [tenantSeed, queueAuthority.publicKey.toBuffer()],
+    privateMatchmaking.programId
+  );
+
   const player1 = Keypair.generate();
   const player2 = Keypair.generate();
 
@@ -108,16 +114,31 @@ describe("architecture-refactor-verification", () => {
     );
   });
 
-  it("Initialize Infrastructure (Queue) & Delegate", async () => {
-      // Initialize on L1 (using standard provider)
+  it("Initialize Infrastructure (Tenant & Queue) & Delegate", async () => {
+      // 1. Initialize Tenant
       await sendAndConfirmRobust(
           privateMatchmaking,
-          privateMatchmaking.methods.initializeQueue({
-              tenantProgramId: rpsGame.programId,
-              eloOffset: 8 + 32, // Discriminator + Pubkey = 40. ELO is next 8 bytes.
-              eloWindow: new anchor.BN(100),
-          }).accounts({
+          privateMatchmaking.methods.initializeTenant(
+            rpsGame.programId,
+            8 + 32, // Discriminator + Pubkey
+            new anchor.BN(100)
+          ).accounts({
+              tenant: tenantPda,
               authority: queueAuthority.publicKey,
+              systemProgram: SystemProgram.programId,
+          }).transaction(),
+          [queueAuthority]
+      );
+      console.log("Tenant Initialized");
+
+      // 2. Initialize Queue (Linked to Tenant)
+      await sendAndConfirmRobust(
+          privateMatchmaking,
+          privateMatchmaking.methods.initializeQueue().accounts({
+              queue: queuePda,
+              tenant: tenantPda,
+              authority: queueAuthority.publicKey,
+              systemProgram: SystemProgram.programId,
           }).transaction(),
           [queueAuthority]
       );
@@ -259,6 +280,7 @@ describe("architecture-refactor-verification", () => {
       // We must use the TEE Provider to send this, because the Queue is in TEE.
       await sendAndConfirmRobust(mmP1, mmP1.methods.joinQueue().accounts({
           queue: queuePda,
+          tenant: tenantPda,
           playerData: p1ProfilePda,
           signer: player1.publicKey,
       }).transaction(), [player1]);
@@ -294,6 +316,7 @@ describe("architecture-refactor-verification", () => {
       
       await sendAndConfirmRobust(mmP2, mmP2.methods.joinQueue().accounts({
           queue: queuePda,
+          tenant: tenantPda,
           playerData: p2ProfilePda,
           signer: player2.publicKey,
       }).transaction(), [player2]);
@@ -311,6 +334,7 @@ describe("architecture-refactor-verification", () => {
           mmAuth,
           mmAuth.methods.processMatch().accounts({
               queue: queuePda,
+              tenant: tenantPda,
               authority: queueAuthority.publicKey, 
           }).transaction(),
           [queueAuthority]
