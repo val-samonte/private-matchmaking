@@ -3,14 +3,15 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::access_control::instructions::CreatePermissionCpiBuilder;
 use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs};
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
-use ephemeral_rollups_sdk::consts::{MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID};
+use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accounts};
+use ephemeral_rollups_sdk::ephem::commit_accounts;
 
 declare_id!("ENUPVoY1BtRBkdY5TwNqbQmpeU2nrUdJvRkPRDRqUuMU");
 
-pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v31";
-pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v31";
+pub const MATCHMAKING_STATE_SEED: &[u8] = b"matchmaking_state_v35";
+pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v35";
+pub const DELEGATION_PROGRAM_ID: Pubkey = pubkey!("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 #[ephemeral]
 #[program]
@@ -238,6 +239,12 @@ pub mod anchor_rock_paper_scissor {
 
         let validator = ctx.accounts.validator.as_ref().map(|v| v.key());
 
+        msg!(
+            "Delegating account {:?} with seeds {:?}",
+            ctx.accounts.pda.key(),
+            seeds_refs
+        );
+
         ctx.accounts.delegate_pda(
             &ctx.accounts.payer,
             &seeds_refs,
@@ -245,29 +252,6 @@ pub mod anchor_rock_paper_scissor {
                 validator,
                 ..Default::default()
             },
-        )?;
-        Ok(())
-    }
-
-    /// Undelegate account (Reclaim ownership to L1 Program)
-    /// Reclaim Matchmaking State (Commit + Undelegate)
-    pub fn reclaim_matchmaking(ctx: Context<ReclaimMatchmaking>) -> Result<()> {
-        commit_and_undelegate_accounts(
-            &ctx.accounts.payer,
-            vec![&ctx.accounts.matchmaking_state.to_account_info()],
-            &ctx.accounts.magic_context.to_account_info(),
-            &ctx.accounts.magic_program.to_account_info(),
-        )?;
-        Ok(())
-    }
-
-    /// Reclaim Player Profile (Commit + Undelegate)
-    pub fn reclaim_player(ctx: Context<ReclaimPlayer>) -> Result<()> {
-        commit_and_undelegate_accounts(
-            &ctx.accounts.payer,
-            vec![&ctx.accounts.profile.to_account_info()],
-            &ctx.accounts.magic_context.to_account_info(),
-            &ctx.accounts.magic_program.to_account_info(),
         )?;
         Ok(())
     }
@@ -353,7 +337,7 @@ pub struct InitializePlayer<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + PlayerProfile::LEN,
+        space = 8 + PlayerProfile::LEN + 128,
         seeds = [PLAYER_PROFILE_SEED, player.key().as_ref()],
         bump
     )]
@@ -451,37 +435,6 @@ pub struct DelegatePda<'info> {
 }
 
 #[derive(Accounts)]
-pub struct ReclaimMatchmaking<'info> {
-    /// CHECK: Delegated - Owner is MagicBlock
-    #[account(mut, seeds = [MATCHMAKING_STATE_SEED], bump)]
-    pub matchmaking_state: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    /// CHECK: Magic Context
-    #[account(mut)]
-    pub magic_context: UncheckedAccount<'info>,
-    /// CHECK: Magic Program
-    #[account(address = MAGIC_PROGRAM_ID)]
-    pub magic_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-pub struct ReclaimPlayer<'info> {
-    /// CHECK: Delegated - Owner is MagicBlock
-    #[account(mut, seeds = [PLAYER_PROFILE_SEED, player.key().as_ref()], bump)]
-    pub profile: UncheckedAccount<'info>,
-    pub player: Signer<'info>,
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    /// CHECK: Magic Context
-    #[account(mut)]
-    pub magic_context: UncheckedAccount<'info>,
-    /// CHECK: Magic Program
-    #[account(address = MAGIC_PROGRAM_ID)]
-    pub magic_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
 pub struct CreatePermission<'info> {
     /// CHECK: Validated via permission program CPI
     pub permissioned_account: UncheckedAccount<'info>,
@@ -505,8 +458,8 @@ pub struct MatchmakingState {
 }
 
 impl MatchmakingState {
-    // 50KB space buffer
-    pub const LEN: usize = 8 + 1 + 8 + (4 + 32 * 5) + (4 + InternalGame::LEN * 5);
+    // 5KB space buffer (Safe within 10KB limit)
+    pub const LEN: usize = 5120;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
