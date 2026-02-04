@@ -172,4 +172,83 @@ describe("architecture-refactor-verification", () => {
       console.log("Queue Entries (After Match):", queueAccount.entries.length);
       assert.equal(queueAccount.entries.length, 0);
   });
+
+  it("Play Game (Start & Moves)", async () => {
+      const gameId = new anchor.BN(1);
+      const gameSessionSeed = Buffer.from("game_session_v1");
+
+      // Derive Game Session PDA
+      // Seeds: [SEED, p1, p2, id]
+      const [gameSessionPda] = PublicKey.findProgramAddressSync(
+          [
+              gameSessionSeed, 
+              player1.publicKey.toBuffer(), 
+              player2.publicKey.toBuffer(), 
+              gameId.toArrayLike(Buffer, 'le', 8)
+          ],
+          rpsGame.programId
+      );
+
+      // P1 Starts Game
+      const rpsP1 = await getTeeProgram(player1);
+      await rpsP1.methods.startGame(gameId, player2.publicKey).accounts({
+          gameSession: gameSessionPda,
+          player: player1.publicKey,
+      } as { gameSession: PublicKey, player: PublicKey }).rpc();
+      console.log("Game Session Started");
+
+      // P1 Moves (Rock)
+      // Enum: Rock=0, Paper=1, Scissors=2
+      await rpsP1.methods.makeChoice({ rock: {} }).accounts({
+          gameSession: gameSessionPda,
+          player: player1.publicKey,
+      }).rpc();
+      console.log("P1 Chose Rock");
+
+      // P2 Moves (Paper)
+      const rpsP2 = await getTeeProgram(player2);
+      await rpsP2.methods.makeChoice({ paper: {} }).accounts({
+          gameSession: gameSessionPda,
+          player: player2.publicKey, 
+      }).rpc();
+      console.log("P2 Chose Paper");
+
+      // Verify Result
+      const sessionAccount = await rpsGame.account.gameSession.fetch(gameSessionPda);
+      console.log("Game Result:", JSON.stringify(sessionAccount.result));
+      
+      // Result should be Winner(Player2) because Paper beats Rock
+      // Verify object structure matches expected Enum { winner: PublicKey }
+      // The IDL deserializer returns { "0": "base58" } or array for complex enums sometimes
+      const winnerObj = sessionAccount.result.winner as unknown as { "0"?: string, [key: number]: string };
+      const winnerKey = winnerObj[0] || winnerObj['0'];
+      const winnerPk = new PublicKey(winnerKey);
+      assert.equal(winnerPk.toString(), player2.publicKey.toString());
+  });
+  after("Reclaim Funds (Cleanup)", async () => {
+      const payer = (provider.wallet as anchor.Wallet).payer;
+      const startBalance = await provider.connection.getBalance(payer.publicKey);
+      console.log("Payer Balance Before Cleanup:", startBalance / LAMPORTS_PER_SOL);
+
+      // Close P1 Profile
+      const rpsP1 = await getTeeProgram(player1);
+      await rpsP1.methods.closePlayer().accounts({
+          payer: payer.publicKey,
+      }).rpc();
+
+      // Close P2 Profile
+      const rpsP2 = await getTeeProgram(player2);
+      await rpsP2.methods.closePlayer().accounts({
+          payer: payer.publicKey,
+      }).rpc();
+
+      const endBalance = await provider.connection.getBalance(payer.publicKey);
+      console.log("Payer Balance After Cleanup:", endBalance / LAMPORTS_PER_SOL);
+      
+      const reclaimed = endBalance - startBalance;
+      console.log("Reclaimed SOL:", reclaimed / LAMPORTS_PER_SOL);
+      
+      // We expect some reclamation (rent for 2 profiles ~0.003 SOL) minus tx fees
+      assert.isAbove(reclaimed, 0, "Should have reclaimed rent funds");
+  });
 });
