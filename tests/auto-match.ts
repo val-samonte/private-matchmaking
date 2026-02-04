@@ -208,6 +208,25 @@ describe("architecture-refactor-verification", () => {
       assert.equal(p1Profile.elo.toNumber(), 990);
       assert.equal(p2Profile.elo.toNumber(), 1010);
   });
+  after("Reclaim Funds (Cleanup)", async () => {
+      const payer = (provider.wallet as anchor.Wallet).payer;
+      const startBalance = await provider.connection.getBalance(payer.publicKey);
+
+      // Close P1 Profile
+      const rpsP1 = await getTeeProgram(player1);
+      await rpsP1.methods.closePlayer().accounts({
+          payer: payer.publicKey,
+      }).rpc();
+
+      // Close P2 Profile
+      const rpsP2 = await getTeeProgram(player2);
+      await rpsP2.methods.closePlayer().accounts({
+          payer: payer.publicKey,
+      }).rpc();
+
+      const endBalance = await provider.connection.getBalance(payer.publicKey);
+      const reclaimed = endBalance - startBalance;
+      // We expect some reclamation (rent for 2 profiles ~0.003 SOL) minus tx fees
       // assert.isAbove(reclaimed, 0, "Should have reclaimed rent funds");
   });
 });
