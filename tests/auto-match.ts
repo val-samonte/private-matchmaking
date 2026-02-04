@@ -112,21 +112,22 @@ describe("architecture-refactor-verification", () => {
 
   it("Initialize Infrastructure (Tenant & Queue) & Delegate", async () => {
       // 1. Initialize Tenant
-      const adminClient = new MatchmakingAdmin(provider, privateMatchmaking.programId);
+      const mmAdmin = new MatchmakingAdmin(provider, privateMatchmaking.programId);
 
-      // 1. Initialize Tenant
-      await adminClient.initializeTenant(
-          queueAuthority.publicKey, 
-          rpsGame.programId, 
-          100, 
-          8 + 32,
-          undefined,
-          [queueAuthority]
+      await mmAdmin.initializeTenant(
+        rpsGame.programId,
+        {
+          authority: queueAuthority.publicKey,
+          eloWindow: 100,
+          eloOffset: 8 + 32,
+          eloDataType: 'u64' // Using u64 for compatibility with existing PlayerProfile
+        },
+        undefined,
+        [queueAuthority]
       );
-      console.log("Tenant Initialized");
 
       // 2. Initialize Queue
-      await adminClient.initializeQueue(
+      await mmAdmin.initializeQueue(
           queueAuthority.publicKey,
           tenantPda,
           undefined,
@@ -134,7 +135,7 @@ describe("architecture-refactor-verification", () => {
       );
 
       // 3. Delegate Queue
-      await adminClient.delegateQueue(
+      await mmAdmin.delegateQueue(
           queueAuthority.publicKey,
           ER_VALIDATOR,
           undefined,

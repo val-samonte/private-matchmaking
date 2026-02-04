@@ -4,6 +4,24 @@ import { PublicKey, SystemProgram, TransactionSignature, ConfirmOptions, Keypair
 import { Duel } from "./types";
 import IDL from "./duel.json";
 
+export type EloDataType = 'u8' | 'u16' | 'u32' | 'u64';
+
+export interface InitializeTenantOptions {
+  authority?: PublicKey;     // Optional, defaults to tenantProgramId
+  eloWindow?: number;        // Default: 100
+  eloOffset?: number;        // Default: 40
+  eloDataType?: EloDataType; // Default: 'u16'
+}
+
+function getEloSize(dataType: EloDataType): number {
+  switch (dataType) {
+    case 'u8': return 1;
+    case 'u16': return 2;
+    case 'u32': return 4;
+    case 'u64': return 8;
+  }
+}
+
 export class MatchmakingAdmin {
   program: Program<Duel>;
   provider: AnchorProvider;
@@ -40,18 +58,26 @@ export class MatchmakingAdmin {
    * Initialize a Tenant
    */
   async initializeTenant(
-    authority: PublicKey,
     tenantProgramId: PublicKey,
-    eloWindow: number = 100,
-    eloOffset: number = 8 + 32,
+    options?: InitializeTenantOptions,
     confirmOptions?: ConfirmOptions,
     signers: Keypair[] = []
   ): Promise<TransactionSignature> {
+    const {
+      authority = tenantProgramId,
+      eloWindow = 100,
+      eloOffset = 40,
+      eloDataType = 'u16'
+    } = options || {};
+    
+    const eloSize = getEloSize(eloDataType);
     const tenantPda = this.getTenantPda(authority);
+    
     return await this.program.methods
       .initializeTenant(
         tenantProgramId,
         eloOffset,
+        eloSize,
         new anchor.BN(eloWindow)
       )
       .accountsPartial({

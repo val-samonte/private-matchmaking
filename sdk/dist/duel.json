@@ -293,6 +293,10 @@
                     "type": "u32"
                 },
                 {
+                    "name": "elo_size",
+                    "type": "u8"
+                },
+                {
                     "name": "elo_window",
                     "type": "u64"
                 }
@@ -440,6 +444,11 @@
             "code": 6002,
             "name": "Unauthorized",
             "msg": "Unauthorized access"
+        },
+        {
+            "code": 6003,
+            "name": "InvalidEloSize",
+            "msg": "Invalid ELO size (must be 1, 2, 4, or 8 bytes)"
         }
     ],
     "types": [
@@ -522,6 +531,10 @@
                     {
                         "name": "elo_offset",
                         "type": "u32"
+                    },
+                    {
+                        "name": "elo_size",
+                        "type": "u8"
                     },
                     {
                         "name": "elo_window",

@@ -13,14 +13,20 @@ pub mod duel {
         ctx: Context<InitializeTenant>,
         tenant_program_id: Pubkey,
         elo_offset: u32,
+        elo_size: u8,
         elo_window: u64,
     ) -> Result<()> {
         let tenant = &mut ctx.accounts.tenant;
         tenant.authority = ctx.accounts.authority.key();
         tenant.tenant_program_id = tenant_program_id;
         tenant.elo_offset = elo_offset;
+        tenant.elo_size = elo_size;
         tenant.elo_window = elo_window;
-        msg!("Tenant Initialized for Program: {}", tenant_program_id);
+        msg!(
+            "Tenant Initialized for Program: {} (ELO size: {} bytes)",
+            tenant_program_id,
+            elo_size
+        );
         Ok(())
     }
 
@@ -69,19 +75,36 @@ pub mod duel {
             require!(owner != &System::id(), MatchmakingError::InvalidTenant);
         }
 
-        // 2. Read ELO (Generic)
+        // 2. Read ELO (Generic - supports u8, u16, u32, u64)
         let data = player_account_info.try_borrow_data()?;
         let offset = ctx.accounts.tenant.elo_offset as usize;
+        let elo_size = ctx.accounts.tenant.elo_size as usize;
 
-        if data.len() < offset + 8 {
+        if data.len() < offset + elo_size {
             return err!(MatchmakingError::DataTooSmall);
         }
 
-        let mut elo_bytes = [0u8; 8];
-        elo_bytes.copy_from_slice(&data[offset..offset + 8]);
-        let elo = u64::from_le_bytes(elo_bytes);
+        let elo = match elo_size {
+            1 => data[offset] as u64,
+            2 => {
+                let mut bytes = [0u8; 2];
+                bytes.copy_from_slice(&data[offset..offset + 2]);
+                u16::from_le_bytes(bytes) as u64
+            }
+            4 => {
+                let mut bytes = [0u8; 4];
+                bytes.copy_from_slice(&data[offset..offset + 4]);
+                u32::from_le_bytes(bytes) as u64
+            }
+            8 => {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&data[offset..offset + 8]);
+                u64::from_le_bytes(bytes)
+            }
+            _ => return err!(MatchmakingError::InvalidEloSize),
+        };
 
-        msg!("Player joined with ELO: {}", elo);
+        msg!("Player joined with ELO: {} ({} bytes)", elo, elo_size);
 
         // 3. Insert into Queue
         let entry = QueueEntry {
@@ -229,11 +252,12 @@ pub struct Tenant {
     pub authority: Pubkey,
     pub tenant_program_id: Pubkey,
     pub elo_offset: u32,
+    pub elo_size: u8,
     pub elo_window: u64,
 }
 
 impl Tenant {
-    pub const LEN: usize = 32 + 32 + 4 + 8;
+    pub const LEN: usize = 32 + 32 + 4 + 1 + 8;
 }
 
 impl Queue {
@@ -261,6 +285,8 @@ pub enum MatchmakingError {
     DataTooSmall,
     #[msg("Unauthorized access")]
     Unauthorized,
+    #[msg("Invalid ELO size (must be 1, 2, 4, or 8 bytes)")]
+    InvalidEloSize,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

@@ -299,6 +299,10 @@ export type Duel = {
           "type": "u32"
         },
         {
+          "name": "eloSize",
+          "type": "u8"
+        },
+        {
           "name": "eloWindow",
           "type": "u64"
         }
@@ -446,6 +450,11 @@ export type Duel = {
       "code": 6002,
       "name": "unauthorized",
       "msg": "Unauthorized access"
+    },
+    {
+      "code": 6003,
+      "name": "invalidEloSize",
+      "msg": "Invalid ELO size (must be 1, 2, 4, or 8 bytes)"
     }
   ],
   "types": [
@@ -528,6 +537,10 @@ export type Duel = {
           {
             "name": "eloOffset",
             "type": "u32"
+          },
+          {
+            "name": "eloSize",
+            "type": "u8"
           },
           {
             "name": "eloWindow",
