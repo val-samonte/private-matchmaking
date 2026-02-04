@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build artifacts from other tools
+client/
+
+# Development files
+*.log
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
