@@ -14,7 +14,7 @@
 The project consists of three main components:
 
 1.  **Duel Program (`programs/duel`)**: The core matchmaking logic. It manages Tenants (game developers) and Queues. It runs as an Ephemeral Rollup for privacy.
-2.  **RPS Game (`programs/rps-game`)**: A reference implementation of a game using Duel. It demonstrates Cross-Program Invocation (CPI) to the matchmaking system.
+2.  **RPS Game (`programs/rps-game`)**: A reference implementation of a game using Duel. It demonstrates how a secure game program integrates with the matchmaking system, including account validation and result handling.
 3.  **SDK (`@1upmonster/duel`)**: A TypeScript client for developers to integrate matchmaking into their applications.
 
 ## Prerequisities
@@ -70,7 +70,8 @@ import { MatchmakingAdmin } from "@1upmonster/duel";
 const admin = new MatchmakingAdmin(provider, programId);
 
 // 1. Initialize Tenant for your Game Program
-await admin.initializeTenant(authority, gameProgramId);
+// Args: authority, tenantProgramId, eloWindow (default 100), eloOffset (default 40)
+await admin.initializeTenant(authority, gameProgramId, 200, 40);
 
 // 2. Initialize a Matchmaking Queue
 await admin.initializeQueue(authority, tenantPda);
