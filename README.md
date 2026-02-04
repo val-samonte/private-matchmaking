@@ -14,8 +14,14 @@
 The project consists of three main components:
 
 1.  **Duel Program (`programs/duel`)**: The core matchmaking logic. It manages Tenants (game developers) and Queues. It runs as an Ephemeral Rollup for privacy.
-2.  **RPS Game (`programs/rps-game`)**: A reference implementation of a game using Duel. It demonstrates how a secure game program integrates with the matchmaking system, including account validation and result handling.
-3.  **SDK (`@1upmonster/duel`)**: A TypeScript client for developers to integrate matchmaking into their applications.
+2.  **RPS Game (`programs/rps-game`)**: A reference implementation of a game using Duel. It demonstrates how a game program validates matched players and handles results.
+3.  **SDK (`@1upmonster/duel`)**: A TypeScript client SDK that allows players to join queues directly from their wallets (no CPI required).
+
+### How It Works
+
+1.  **Queue Joining**: Players use the client SDK to join queues directly - no game program involvement needed
+2.  **Matching**: The TEE automatically processes matches based on ELO windows
+3.  **Game Integration**: Once matched, players interact with the game program (e.g., RPS Game)
 
 ## Prerequisities
 
