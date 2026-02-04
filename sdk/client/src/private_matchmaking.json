@@ -1,19 +1,13 @@
-/**
- * Program IDL in camelCase format in order to be used in JS/TS.
- *
- * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/private_matchmaking.json`.
- */
-export type PrivateMatchmaking = {
+{
   "address": "sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz",
   "metadata": {
-    "name": "privateMatchmaking",
+    "name": "private_matchmaking",
     "version": "0.1.0",
     "spec": "0.1.0"
   },
   "instructions": [
     {
-      "name": "delegateQueue",
+      "name": "delegate_queue",
       "discriminator": [
         31,
         200,
@@ -26,7 +20,7 @@ export type PrivateMatchmaking = {
       ],
       "accounts": [
         {
-          "name": "bufferPda",
+          "name": "buffer_pda",
           "writable": true,
           "pda": {
             "seeds": [
@@ -86,7 +80,7 @@ export type PrivateMatchmaking = {
           }
         },
         {
-          "name": "delegationRecordPda",
+          "name": "delegation_record_pda",
           "writable": true,
           "pda": {
             "seeds": [
@@ -112,12 +106,12 @@ export type PrivateMatchmaking = {
             ],
             "program": {
               "kind": "account",
-              "path": "delegationProgram"
+              "path": "delegation_program"
             }
           }
         },
         {
-          "name": "delegationMetadataPda",
+          "name": "delegation_metadata_pda",
           "writable": true,
           "pda": {
             "seeds": [
@@ -152,7 +146,7 @@ export type PrivateMatchmaking = {
             ],
             "program": {
               "kind": "account",
-              "path": "delegationProgram"
+              "path": "delegation_program"
             }
           }
         },
@@ -170,31 +164,31 @@ export type PrivateMatchmaking = {
           "optional": true
         },
         {
-          "name": "ownerProgram",
+          "name": "owner_program",
           "address": "sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz"
         },
         {
-          "name": "delegationProgram",
+          "name": "delegation_program",
           "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
         },
         {
-          "name": "systemProgram",
+          "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "accountType",
+          "name": "account_type",
           "type": {
             "defined": {
-              "name": "accountType"
+              "name": "AccountType"
             }
           }
         }
       ]
     },
     {
-      "name": "initializeQueue",
+      "name": "initialize_queue",
       "discriminator": [
         174,
         102,
@@ -237,14 +231,14 @@ export type PrivateMatchmaking = {
           "signer": true
         },
         {
-          "name": "systemProgram",
+          "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
     },
     {
-      "name": "initializeTenant",
+      "name": "initialize_tenant",
       "discriminator": [
         94,
         120,
@@ -285,27 +279,27 @@ export type PrivateMatchmaking = {
           "signer": true
         },
         {
-          "name": "systemProgram",
+          "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "tenantProgramId",
+          "name": "tenant_program_id",
           "type": "pubkey"
         },
         {
-          "name": "eloOffset",
+          "name": "elo_offset",
           "type": "u32"
         },
         {
-          "name": "eloWindow",
+          "name": "elo_window",
           "type": "u64"
         }
       ]
     },
     {
-      "name": "joinQueue",
+      "name": "join_queue",
       "discriminator": [
         157,
         115,
@@ -325,7 +319,7 @@ export type PrivateMatchmaking = {
           "name": "tenant"
         },
         {
-          "name": "playerData",
+          "name": "player_data",
           "writable": true
         },
         {
@@ -336,7 +330,7 @@ export type PrivateMatchmaking = {
       "args": []
     },
     {
-      "name": "processMatch",
+      "name": "process_match",
       "discriminator": [
         139,
         58,
@@ -366,7 +360,7 @@ export type PrivateMatchmaking = {
       "args": []
     },
     {
-      "name": "processUndelegation",
+      "name": "process_undelegation",
       "discriminator": [
         196,
         28,
@@ -379,7 +373,7 @@ export type PrivateMatchmaking = {
       ],
       "accounts": [
         {
-          "name": "baseAccount",
+          "name": "base_account",
           "writable": true
         },
         {
@@ -390,12 +384,12 @@ export type PrivateMatchmaking = {
           "writable": true
         },
         {
-          "name": "systemProgram"
+          "name": "system_program"
         }
       ],
       "args": [
         {
-          "name": "accountSeeds",
+          "name": "account_seeds",
           "type": {
             "vec": "bytes"
           }
@@ -405,7 +399,7 @@ export type PrivateMatchmaking = {
   ],
   "accounts": [
     {
-      "name": "queue",
+      "name": "Queue",
       "discriminator": [
         204,
         167,
@@ -418,7 +412,7 @@ export type PrivateMatchmaking = {
       ]
     },
     {
-      "name": "tenant",
+      "name": "Tenant",
       "discriminator": [
         61,
         43,
@@ -434,28 +428,28 @@ export type PrivateMatchmaking = {
   "errors": [
     {
       "code": 6000,
-      "name": "invalidTenant",
+      "name": "InvalidTenant",
       "msg": "Account does not belong to the specified Tenant Program"
     },
     {
       "code": 6001,
-      "name": "dataTooSmall",
+      "name": "DataTooSmall",
       "msg": "Account data too small for ELO read"
     },
     {
       "code": 6002,
-      "name": "unauthorized",
+      "name": "Unauthorized",
       "msg": "Unauthorized access"
     }
   ],
   "types": [
     {
-      "name": "accountType",
+      "name": "AccountType",
       "type": {
         "kind": "enum",
         "variants": [
           {
-            "name": "queue",
+            "name": "Queue",
             "fields": [
               {
                 "name": "authority",
@@ -467,7 +461,7 @@ export type PrivateMatchmaking = {
       }
     },
     {
-      "name": "queue",
+      "name": "Queue",
       "type": {
         "kind": "struct",
         "fields": [
@@ -488,7 +482,7 @@ export type PrivateMatchmaking = {
             "type": {
               "vec": {
                 "defined": {
-                  "name": "queueEntry"
+                  "name": "QueueEntry"
                 }
               }
             }
@@ -497,7 +491,7 @@ export type PrivateMatchmaking = {
       }
     },
     {
-      "name": "queueEntry",
+      "name": "QueueEntry",
       "type": {
         "kind": "struct",
         "fields": [
@@ -513,7 +507,7 @@ export type PrivateMatchmaking = {
       }
     },
     {
-      "name": "tenant",
+      "name": "Tenant",
       "type": {
         "kind": "struct",
         "fields": [
@@ -522,19 +516,19 @@ export type PrivateMatchmaking = {
             "type": "pubkey"
           },
           {
-            "name": "tenantProgramId",
+            "name": "tenant_program_id",
             "type": "pubkey"
           },
           {
-            "name": "eloOffset",
+            "name": "elo_offset",
             "type": "u32"
           },
           {
-            "name": "eloWindow",
+            "name": "elo_window",
             "type": "u64"
           }
         ]
       }
     }
   ]
-};
+}

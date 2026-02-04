@@ -1,5 +1,5 @@
 {
-  "name": "private-matchmaking-sdk",
+  "name": "@private-matchmaking/sdk",
   "version": "0.1.0",
   "description": "SDK for Private Matchmaking on Solana",
   "main": "dist/index.js",

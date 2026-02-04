@@ -16,7 +16,7 @@ import {
   waitUntilPermissionActive,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 import * as nacl from "tweetnacl";
-import { MatchmakingClient } from "../app/client/src";
+import { MatchmakingAdmin, MatchmakingPlayer } from "../sdk/src";
 
 describe("architecture-refactor-verification", () => {
   const provider = anchor.AnchorProvider.env();
@@ -117,10 +117,10 @@ describe("architecture-refactor-verification", () => {
 
   it("Initialize Infrastructure (Tenant & Queue) & Delegate", async () => {
       // 1. Initialize Tenant
-      const clientL1 = new MatchmakingClient(provider, privateMatchmaking.programId);
+      const adminClient = new MatchmakingAdmin(provider, privateMatchmaking.programId);
 
       // 1. Initialize Tenant
-      await clientL1.initializeTenant(
+      await adminClient.initializeTenant(
           queueAuthority.publicKey, 
           rpsGame.programId, 
           100, 
@@ -131,7 +131,7 @@ describe("architecture-refactor-verification", () => {
       console.log("Tenant Initialized");
 
       // 2. Initialize Queue
-      await clientL1.initializeQueue(
+      await adminClient.initializeQueue(
           queueAuthority.publicKey,
           tenantPda,
           undefined,
@@ -139,7 +139,7 @@ describe("architecture-refactor-verification", () => {
       );
 
       // 3. Delegate Queue
-      await clientL1.delegateQueue(
+      await adminClient.delegateQueue(
           queueAuthority.publicKey,
           ER_VALIDATOR,
           undefined,
@@ -268,7 +268,7 @@ describe("architecture-refactor-verification", () => {
       // Use TEE Provider
       const mmP1 = await getMatchmakingProgram(player1, providerTeePlayer1);
       
-      const clientP1 = new MatchmakingClient(providerTeePlayer1, privateMatchmaking.programId);
+      const clientP1 = new MatchmakingPlayer(providerTeePlayer1, privateMatchmaking.programId);
       await clientP1.joinQueue(queuePda, tenantPda, p1ProfilePda);
 
       console.log("P1 Joined Queue via Client");
@@ -300,7 +300,7 @@ describe("architecture-refactor-verification", () => {
   it("P2 Joins Queue and Matches", async () => {
       const mmP2 = await getMatchmakingProgram(player2, providerTeePlayer2);
       
-      const clientP2 = new MatchmakingClient(providerTeePlayer2, privateMatchmaking.programId);
+      const clientP2 = new MatchmakingPlayer(providerTeePlayer2, privateMatchmaking.programId);
       await clientP2.joinQueue(queuePda, tenantPda, p2ProfilePda);
 
       console.log("P2 Joined Queue via Client");
@@ -311,7 +311,7 @@ describe("architecture-refactor-verification", () => {
 
       // Process Match SHOULD be done by an Authority (e.g. queueAuthority or separate matcher)
       // Here we use queueAuthority with TEE Provider
-      const clientAuth = new MatchmakingClient(providerTeeQueueAuth, privateMatchmaking.programId);
+      const clientAuth = new MatchmakingAdmin(providerTeeQueueAuth, privateMatchmaking.programId);
       await clientAuth.processMatch(queuePda, tenantPda); 
 
       console.log("Match Processed (TEE)");
