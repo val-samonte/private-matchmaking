@@ -104,8 +104,12 @@ import { MatchmakingAdmin } from "@1upmonster/duel";
 const admin = new MatchmakingAdmin(provider);
 
 // 1. Initialize Tenant for your Game Program
-// Args: authority, tenantProgramId, eloWindow (default 100), eloOffset (default 40)
-await admin.initializeTenant(authority, gameProgramId, 200, 40);
+await admin.initializeTenant(gameProgramId, {
+  authority,      // optional, defaults to gameProgramId
+  eloWindow: 200, // optional, default 100
+  eloOffset: 40,  // optional, default 40
+  eloDataType: 'u16' // optional, default 'u16' (u8/u16/u32/u64)
+});
 
 // 2. Initialize a Matchmaking Queue
 await admin.initializeQueue(authority, tenantPda);

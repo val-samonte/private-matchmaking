@@ -28,16 +28,28 @@ import { AnchorProvider } from "@coral-xyz/anchor";
 const admin = new MatchmakingAdmin(provider);
 
 // 1. Initialize Tenant for your Game Program
-// Args: authority, tenantProgramId, eloWindow (default 100), eloOffset (default 40)
-await admin.initializeTenant(authority, gameProgramId, 200, 40);
+await admin.initializeTenant(gameProgramId, {
+  authority,      // optional, defaults to gameProgramId
+  eloWindow: 200, // optional, default 100
+  eloOffset: 40,  // optional, default 40
+  eloDataType: 'u16' // optional, default 'u16' (u8/u16/u32/u64)
+});
 
 // 2. Initialize a Matchmaking Queue
 const tenantPda = admin.getTenantPda(authority);
 await admin.initializeQueue(authority, tenantPda);
 
-// 3. Delegate Queue to TEE Validator
+// 3. Delegate to TEE Validator
 await admin.delegateQueue(authority, validatorPubkey);
 ```
+
+### ELO Data Types
+
+The SDK supports different ELO data types to optimize storage:
+- `'u8'`: 0-255 (1 byte)
+- `'u16'`: 0-65,535 (2 bytes) **[DEFAULT]**
+- `'u32'`: 0-4,294,967,295 (4 bytes)
+- `'u64'`: 0-18,446,744,073,709,551,615 (8 bytes)
 
 ### For Players
 
