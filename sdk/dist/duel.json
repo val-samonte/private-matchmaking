@@ -1,19 +1,13 @@
-/**
- * Program IDL in camelCase format in order to be used in JS/TS.
- *
- * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/duel.json`.
- */
-export type Duel = {
-    "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X";
+{
+    "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X",
     "metadata": {
-        "name": "duel";
-        "version": "0.1.0";
-        "spec": "0.1.0";
-    };
+        "name": "duel",
+        "version": "0.1.0",
+        "spec": "0.1.0"
+    },
     "instructions": [
         {
-            "name": "delegateQueue";
+            "name": "delegate_queue",
             "discriminator": [
                 31,
                 200,
@@ -23,15 +17,15 @@ export type Duel = {
                 239,
                 83,
                 87
-            ];
+            ],
             "accounts": [
                 {
-                    "name": "bufferPda";
-                    "writable": true;
+                    "name": "buffer_pda",
+                    "writable": true,
                     "pda": {
                         "seeds": [
                             {
-                                "kind": "const";
+                                "kind": "const",
                                 "value": [
                                     98,
                                     117,
@@ -39,15 +33,15 @@ export type Duel = {
                                     102,
                                     101,
                                     114
-                                ];
+                                ]
                             },
                             {
-                                "kind": "account";
-                                "path": "pda";
+                                "kind": "account",
+                                "path": "pda"
                             }
-                        ];
+                        ],
                         "program": {
-                            "kind": "const";
+                            "kind": "const",
                             "value": [
                                 202,
                                 134,
@@ -81,17 +75,17 @@ export type Duel = {
                                 104,
                                 246,
                                 134
-                            ];
-                        };
-                    };
+                            ]
+                        }
+                    }
                 },
                 {
-                    "name": "delegationRecordPda";
-                    "writable": true;
+                    "name": "delegation_record_pda",
+                    "writable": true,
                     "pda": {
                         "seeds": [
                             {
-                                "kind": "const";
+                                "kind": "const",
                                 "value": [
                                     100,
                                     101,
@@ -103,26 +97,26 @@ export type Duel = {
                                     105,
                                     111,
                                     110
-                                ];
+                                ]
                             },
                             {
-                                "kind": "account";
-                                "path": "pda";
+                                "kind": "account",
+                                "path": "pda"
                             }
-                        ];
+                        ],
                         "program": {
-                            "kind": "account";
-                            "path": "delegationProgram";
-                        };
-                    };
+                            "kind": "account",
+                            "path": "delegation_program"
+                        }
+                    }
                 },
                 {
-                    "name": "delegationMetadataPda";
-                    "writable": true;
+                    "name": "delegation_metadata_pda",
+                    "writable": true,
                     "pda": {
                         "seeds": [
                             {
-                                "kind": "const";
+                                "kind": "const",
                                 "value": [
                                     100,
                                     101,
@@ -143,58 +137,58 @@ export type Duel = {
                                     97,
                                     116,
                                     97
-                                ];
+                                ]
                             },
                             {
-                                "kind": "account";
-                                "path": "pda";
+                                "kind": "account",
+                                "path": "pda"
                             }
-                        ];
+                        ],
                         "program": {
-                            "kind": "account";
-                            "path": "delegationProgram";
-                        };
-                    };
+                            "kind": "account",
+                            "path": "delegation_program"
+                        }
+                    }
                 },
                 {
-                    "name": "pda";
-                    "writable": true;
+                    "name": "pda",
+                    "writable": true
                 },
                 {
-                    "name": "payer";
-                    "writable": true;
-                    "signer": true;
+                    "name": "payer",
+                    "writable": true,
+                    "signer": true
                 },
                 {
-                    "name": "validator";
-                    "optional": true;
+                    "name": "validator",
+                    "optional": true
                 },
                 {
-                    "name": "ownerProgram";
-                    "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X";
+                    "name": "owner_program",
+                    "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X"
                 },
                 {
-                    "name": "delegationProgram";
-                    "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
+                    "name": "delegation_program",
+                    "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
                 },
                 {
-                    "name": "systemProgram";
-                    "address": "11111111111111111111111111111111";
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
                 }
-            ];
+            ],
             "args": [
                 {
-                    "name": "accountType";
+                    "name": "account_type",
                     "type": {
                         "defined": {
-                            "name": "accountType";
-                        };
-                    };
+                            "name": "AccountType"
+                        }
+                    }
                 }
-            ];
+            ]
         },
         {
-            "name": "initializeQueue";
+            "name": "initialize_queue",
             "discriminator": [
                 174,
                 102,
@@ -204,47 +198,47 @@ export type Duel = {
                 202,
                 27,
                 20
-            ];
+            ],
             "accounts": [
                 {
-                    "name": "queue";
-                    "writable": true;
+                    "name": "queue",
+                    "writable": true,
                     "pda": {
                         "seeds": [
                             {
-                                "kind": "const";
+                                "kind": "const",
                                 "value": [
                                     113,
                                     117,
                                     101,
                                     117,
                                     101
-                                ];
+                                ]
                             },
                             {
-                                "kind": "account";
-                                "path": "authority";
+                                "kind": "account",
+                                "path": "authority"
                             }
-                        ];
-                    };
+                        ]
+                    }
                 },
                 {
-                    "name": "tenant";
+                    "name": "tenant"
                 },
                 {
-                    "name": "authority";
-                    "writable": true;
-                    "signer": true;
+                    "name": "authority",
+                    "writable": true,
+                    "signer": true
                 },
                 {
-                    "name": "systemProgram";
-                    "address": "11111111111111111111111111111111";
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
                 }
-            ];
-            "args": [];
+            ],
+            "args": []
         },
         {
-            "name": "initializeTenant";
+            "name": "initialize_tenant",
             "discriminator": [
                 94,
                 120,
@@ -254,15 +248,15 @@ export type Duel = {
                 167,
                 241,
                 206
-            ];
+            ],
             "accounts": [
                 {
-                    "name": "tenant";
-                    "writable": true;
+                    "name": "tenant",
+                    "writable": true,
                     "pda": {
                         "seeds": [
                             {
-                                "kind": "const";
+                                "kind": "const",
                                 "value": [
                                     116,
                                     101,
@@ -270,42 +264,42 @@ export type Duel = {
                                     97,
                                     110,
                                     116
-                                ];
+                                ]
                             },
                             {
-                                "kind": "account";
-                                "path": "authority";
+                                "kind": "account",
+                                "path": "authority"
                             }
-                        ];
-                    };
+                        ]
+                    }
                 },
                 {
-                    "name": "authority";
-                    "writable": true;
-                    "signer": true;
+                    "name": "authority",
+                    "writable": true,
+                    "signer": true
                 },
                 {
-                    "name": "systemProgram";
-                    "address": "11111111111111111111111111111111";
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
                 }
-            ];
+            ],
             "args": [
                 {
-                    "name": "tenantProgramId";
-                    "type": "pubkey";
+                    "name": "tenant_program_id",
+                    "type": "pubkey"
                 },
                 {
-                    "name": "eloOffset";
-                    "type": "u32";
+                    "name": "elo_offset",
+                    "type": "u32"
                 },
                 {
-                    "name": "eloWindow";
-                    "type": "u64";
+                    "name": "elo_window",
+                    "type": "u64"
                 }
-            ];
+            ]
         },
         {
-            "name": "joinQueue";
+            "name": "join_queue",
             "discriminator": [
                 157,
                 115,
@@ -315,28 +309,28 @@ export type Duel = {
                 86,
                 203,
                 238
-            ];
+            ],
             "accounts": [
                 {
-                    "name": "queue";
-                    "writable": true;
+                    "name": "queue",
+                    "writable": true
                 },
                 {
-                    "name": "tenant";
+                    "name": "tenant"
                 },
                 {
-                    "name": "playerData";
-                    "writable": true;
+                    "name": "player_data",
+                    "writable": true
                 },
                 {
-                    "name": "signer";
-                    "signer": true;
+                    "name": "signer",
+                    "signer": true
                 }
-            ];
-            "args": [];
+            ],
+            "args": []
         },
         {
-            "name": "processMatch";
+            "name": "process_match",
             "discriminator": [
                 139,
                 58,
@@ -346,27 +340,27 @@ export type Duel = {
                 54,
                 202,
                 140
-            ];
+            ],
             "accounts": [
                 {
-                    "name": "queue";
-                    "writable": true;
+                    "name": "queue",
+                    "writable": true
                 },
                 {
-                    "name": "tenant";
+                    "name": "tenant"
                 },
                 {
-                    "name": "authority";
-                    "signer": true;
+                    "name": "authority",
+                    "signer": true,
                     "relations": [
                         "tenant"
-                    ];
+                    ]
                 }
-            ];
-            "args": [];
+            ],
+            "args": []
         },
         {
-            "name": "processUndelegation";
+            "name": "process_undelegation",
             "discriminator": [
                 196,
                 28,
@@ -376,36 +370,36 @@ export type Duel = {
                 37,
                 51,
                 167
-            ];
+            ],
             "accounts": [
                 {
-                    "name": "baseAccount";
-                    "writable": true;
+                    "name": "base_account",
+                    "writable": true
                 },
                 {
-                    "name": "buffer";
+                    "name": "buffer"
                 },
                 {
-                    "name": "payer";
-                    "writable": true;
+                    "name": "payer",
+                    "writable": true
                 },
                 {
-                    "name": "systemProgram";
+                    "name": "system_program"
                 }
-            ];
+            ],
             "args": [
                 {
-                    "name": "accountSeeds";
+                    "name": "account_seeds",
                     "type": {
-                        "vec": "bytes";
-                    };
+                        "vec": "bytes"
+                    }
                 }
-            ];
+            ]
         }
-    ];
+    ],
     "accounts": [
         {
-            "name": "queue";
+            "name": "Queue",
             "discriminator": [
                 204,
                 167,
@@ -415,10 +409,10 @@ export type Duel = {
                 33,
                 2,
                 188
-            ];
+            ]
         },
         {
-            "name": "tenant";
+            "name": "Tenant",
             "discriminator": [
                 61,
                 43,
@@ -428,113 +422,113 @@ export type Duel = {
                 242,
                 209,
                 170
-            ];
+            ]
         }
-    ];
+    ],
     "errors": [
         {
-            "code": 6000;
-            "name": "invalidTenant";
-            "msg": "Account does not belong to the specified Tenant Program";
+            "code": 6000,
+            "name": "InvalidTenant",
+            "msg": "Account does not belong to the specified Tenant Program"
         },
         {
-            "code": 6001;
-            "name": "dataTooSmall";
-            "msg": "Account data too small for ELO read";
+            "code": 6001,
+            "name": "DataTooSmall",
+            "msg": "Account data too small for ELO read"
         },
         {
-            "code": 6002;
-            "name": "unauthorized";
-            "msg": "Unauthorized access";
+            "code": 6002,
+            "name": "Unauthorized",
+            "msg": "Unauthorized access"
         }
-    ];
+    ],
     "types": [
         {
-            "name": "accountType";
+            "name": "AccountType",
             "type": {
-                "kind": "enum";
+                "kind": "enum",
                 "variants": [
                     {
-                        "name": "queue";
+                        "name": "Queue",
                         "fields": [
                             {
-                                "name": "authority";
-                                "type": "pubkey";
+                                "name": "authority",
+                                "type": "pubkey"
                             }
-                        ];
+                        ]
                     }
-                ];
-            };
+                ]
+            }
         },
         {
-            "name": "queue";
+            "name": "Queue",
             "type": {
-                "kind": "struct";
+                "kind": "struct",
                 "fields": [
                     {
-                        "name": "authority";
-                        "type": "pubkey";
+                        "name": "authority",
+                        "type": "pubkey"
                     },
                     {
-                        "name": "tenant";
-                        "type": "pubkey";
+                        "name": "tenant",
+                        "type": "pubkey"
                     },
                     {
-                        "name": "bump";
-                        "type": "u8";
+                        "name": "bump",
+                        "type": "u8"
                     },
                     {
-                        "name": "entries";
+                        "name": "entries",
                         "type": {
                             "vec": {
                                 "defined": {
-                                    "name": "queueEntry";
-                                };
-                            };
-                        };
+                                    "name": "QueueEntry"
+                                }
+                            }
+                        }
                     }
-                ];
-            };
+                ]
+            }
         },
         {
-            "name": "queueEntry";
+            "name": "QueueEntry",
             "type": {
-                "kind": "struct";
+                "kind": "struct",
                 "fields": [
                     {
-                        "name": "player";
-                        "type": "pubkey";
+                        "name": "player",
+                        "type": "pubkey"
                     },
                     {
-                        "name": "elo";
-                        "type": "u64";
+                        "name": "elo",
+                        "type": "u64"
                     }
-                ];
-            };
+                ]
+            }
         },
         {
-            "name": "tenant";
+            "name": "Tenant",
             "type": {
-                "kind": "struct";
+                "kind": "struct",
                 "fields": [
                     {
-                        "name": "authority";
-                        "type": "pubkey";
+                        "name": "authority",
+                        "type": "pubkey"
                     },
                     {
-                        "name": "tenantProgramId";
-                        "type": "pubkey";
+                        "name": "tenant_program_id",
+                        "type": "pubkey"
                     },
                     {
-                        "name": "eloOffset";
-                        "type": "u32";
+                        "name": "elo_offset",
+                        "type": "u32"
                     },
                     {
-                        "name": "eloWindow";
-                        "type": "u64";
+                        "name": "elo_window",
+                        "type": "u64"
                     }
-                ];
-            };
+                ]
+            }
         }
-    ];
-};
+    ]
+}

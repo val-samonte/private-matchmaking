@@ -2,12 +2,12 @@
  * Program IDL in camelCase format in order to be used in JS/TS.
  *
  * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/private_matchmaking.json`.
+ * IDL can be found at `target/idl/duel.json`.
  */
-export type PrivateMatchmaking = {
-  "address": "sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz",
+export type Duel = {
+  "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X",
   "metadata": {
-    "name": "privateMatchmaking",
+    "name": "duel",
     "version": "0.1.0",
     "spec": "0.1.0"
   },
@@ -49,38 +49,38 @@ export type PrivateMatchmaking = {
             "program": {
               "kind": "const",
               "value": [
-                12,
-                238,
-                65,
+                202,
+                134,
+                36,
+                108,
+                174,
+                148,
+                252,
+                73,
+                211,
+                125,
+                15,
+                66,
                 178,
-                64,
-                233,
-                105,
-                143,
-                22,
-                60,
-                201,
-                246,
-                107,
-                142,
-                181,
-                17,
-                16,
-                27,
-                40,
-                197,
+                45,
+                134,
+                44,
+                37,
+                1,
                 240,
-                53,
-                220,
-                78,
-                120,
-                107,
-                39,
-                143,
-                8,
-                72,
-                154,
-                225
+                164,
+                105,
+                155,
+                163,
+                192,
+                243,
+                31,
+                80,
+                29,
+                128,
+                104,
+                246,
+                134
               ]
             }
           }
@@ -171,7 +171,7 @@ export type PrivateMatchmaking = {
         },
         {
           "name": "ownerProgram",
-          "address": "sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz"
+          "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X"
         },
         {
           "name": "delegationProgram",

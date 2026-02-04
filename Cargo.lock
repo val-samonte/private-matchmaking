@@ -820,6 +820,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "duel"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "ephemeral-rollups-sdk",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1391,14 +1399,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "private-matchmaking"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
- "ephemeral-rollups-sdk",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1583,8 +1583,8 @@ name = "rps-game"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "duel",
  "ephemeral-rollups-sdk",
- "private-matchmaking",
 ]
 
 [[package]]

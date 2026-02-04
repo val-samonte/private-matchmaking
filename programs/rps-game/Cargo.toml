@@ -22,7 +22,7 @@ anchor-debug = []
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 ephemeral-rollups-sdk = { version = "0.8.5", features = ["anchor", "access-control"] }
-private-matchmaking = { path = "../private-matchmaking", features = ["cpi", "no-entrypoint"] }
+duel = { path = "../duel", features = ["cpi", "no-entrypoint"] }
 
 [profile.release]
 overflow-checks = true

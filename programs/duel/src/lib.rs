@@ -2,11 +2,11 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::{delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 
-declare_id!("sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz");
+declare_id!("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
 
 #[ephemeral]
 #[program]
-pub mod private_matchmaking {
+pub mod duel {
     use super::*;
 
     pub fn initialize_tenant(

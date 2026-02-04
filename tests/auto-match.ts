@@ -1,15 +1,10 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { RpsGame } from "../target/types/rps_game";
-import { PrivateMatchmaking } from "../target/types/private_matchmaking";
+import { Duel } from "../target/types/duel";
 import { Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 
 import { assert } from "chai";
-
-
-
-
-
 
 import {
   getAuthToken,
@@ -23,7 +18,7 @@ describe("architecture-refactor-verification", () => {
   anchor.setProvider(provider);
 
   const rpsGame = anchor.workspace.RpsGame as Program<RpsGame>;
-  const privateMatchmaking = anchor.workspace.PrivateMatchmaking as Program<PrivateMatchmaking>;
+  const privateMatchmaking = anchor.workspace.Duel as Program<Duel>;
 
   // Accounts
   const queueSeed = Buffer.from("queue");
@@ -75,7 +70,7 @@ describe("architecture-refactor-verification", () => {
       return new anchor.Program(rpsGame.idl as any, p);
   }
 
-  async function getMatchmakingProgram(signer: Keypair, customProvider?: anchor.AnchorProvider): Promise<Program<PrivateMatchmaking>> {
+  async function getMatchmakingProgram(signer: Keypair, customProvider?: anchor.AnchorProvider): Promise<Program<Duel>> {
       const p = customProvider || new anchor.AnchorProvider(new anchor.web3.Connection(TEE_RPC_URL), new anchor.Wallet(signer), { commitment: "confirmed" });
       return new anchor.Program(privateMatchmaking.idl as any, p);
   }

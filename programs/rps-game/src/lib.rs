@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
-use private_matchmaking::Queue; 
+use duel::Queue; 
 
 use ephemeral_rollups_sdk::anchor::{delegate, ephemeral, commit};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_accounts;
 
-declare_id!("BHyvePEQRUKrvC56K1Pdx3Q21okoy1knoCsdQmnMavHN");
+declare_id!("8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos");
 
 pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v35";
 pub const GAME_SESSION_SEED: &[u8] = b"game_session_v1";

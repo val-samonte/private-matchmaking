@@ -1,8 +1,8 @@
 import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { PublicKey, TransactionSignature, ConfirmOptions, Keypair } from "@solana/web3.js";
-import { PrivateMatchmaking } from "./types";
+import { Duel } from "./types";
 export declare class MatchmakingPlayer {
-    program: Program<PrivateMatchmaking>;
+    program: Program<Duel>;
     provider: AnchorProvider;
     constructor(provider: AnchorProvider, programId?: PublicKey);
     /**

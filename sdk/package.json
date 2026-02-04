@@ -1,5 +1,5 @@
 {
-  "name": "@private-matchmaking/sdk",
+  "name": "@1upmonster/duel",
   "version": "0.1.0",
   "description": "SDK for Private Matchmaking on Solana",
   "main": "dist/index.js",

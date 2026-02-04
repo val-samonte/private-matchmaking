@@ -1,16 +1,16 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program, Idl, AnchorProvider } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram, TransactionSignature, ConfirmOptions, Keypair } from "@solana/web3.js";
-import { PrivateMatchmaking } from "./types";
-import IDL from "./private_matchmaking.json";
+import { Duel } from "./types";
+import IDL from "./duel.json";
 
 export class MatchmakingPlayer {
-  program: Program<PrivateMatchmaking>;
+  program: Program<Duel>;
   provider: AnchorProvider;
 
   constructor(provider: AnchorProvider, programId?: PublicKey) {
     this.provider = provider;
-    const PROGRAM_ID = programId || new PublicKey("sUcFSbEig6ydu7ddNhb1dvRksqmC5eRuLxg77wK4PDz");
+    const PROGRAM_ID = programId || new PublicKey("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
     
     // Override address in IDL
     const modifiedIdl = { ...IDL } as any;
