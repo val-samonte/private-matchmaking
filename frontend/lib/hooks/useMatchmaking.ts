@@ -166,41 +166,82 @@ async function pollForMatch(
   pollInterval = 2000
 ): Promise<MatchResult | null> {
   
+  let previousQueueState: any = null;
+  let myQueueEntry: any = null;
+  
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(resolve => setTimeout(resolve, pollInterval));
     
     try {
       const queueAccount = await duelProgram.account.queue.fetch(queuePda);
       
-      // Check if player is still in queue
-      const stillInQueue = queueAccount.entries.some((entry: any) => 
+      // Find my entry in the queue
+      const myEntry = queueAccount.entries.find((entry: any) => 
         entry.player.equals(playerPubkey)
       );
       
-      if (!stillInQueue) {
-        // Player was matched! 
-        // In a real implementation, we'd get this from an event or match history
-        // For now, we'll need to implement a way to get the opponent
-        // This is a simplified version - you may need to enhance this based on your matchmaking program
-        
-        console.log("Player removed from queue - match found!");
-        
-        // Generate a game ID based on timestamp
-        const gameId = Date.now();
-        
-        // TODO: Get actual opponent from matchmaking event or state
-        // For now, return a placeholder that will need to be filled in
-        return {
-          opponent: new PublicKey("11111111111111111111111111111111"), // Placeholder
-          gameId,
-        };
+      // Store my entry for later
+      if (myEntry && !myQueueEntry) {
+        myQueueEntry = myEntry;
       }
       
-      console.log(`Polling attempt ${i + 1}/${maxAttempts} - still in queue`);
+      // Case 1: I'm still in the queue - no match yet
+      if (myEntry) {
+        console.log(`Polling attempt ${i + 1}/${maxAttempts} - still in queue (${queueAccount.entries.length} total)`);
+        previousQueueState = queueAccount;
+        continue;
+      }
+      
+      // Case 2: I was in the queue before, but now I'm not
+      // This means I was matched!
+      if (previousQueueState && !myEntry) {
+        console.log("Player removed from queue - match found!");
+        
+        // Try to find who I was matched with by comparing queue states
+        // The other player should also be removed
+        const previousPlayers = previousQueueState.entries.map((e: any) => e.player.toBase58());
+        const currentPlayers = queueAccount.entries.map((e: any) => e.player.toBase58());
+        
+        // Find players that were removed (should be 2: me and opponent)
+        const removedPlayers = previousPlayers.filter((p: string) => !currentPlayers.includes(p));
+        
+        // The opponent is the removed player that's not me
+        const opponentPubkeyStr = removedPlayers.find((p: string) => p !== playerPubkey.toBase58());
+        
+        if (opponentPubkeyStr) {
+          const opponent = new PublicKey(opponentPubkeyStr);
+          const gameId = Date.now();
+          
+          console.log("Matched with opponent:", opponent.toBase58());
+          
+          return {
+            opponent,
+            gameId,
+          };
+        } else {
+          // Fallback: couldn't determine opponent from queue diff
+          // This shouldn't happen in normal flow
+          console.warn("Could not determine opponent from queue state");
+          return {
+            opponent: new PublicKey("11111111111111111111111111111111"),
+            gameId: Date.now(),
+          };
+        }
+      }
+      
+      // Case 3: I was never in the queue (error state)
+      if (!previousQueueState) {
+        console.error("Player was never found in queue - possible error");
+        throw new Error("Player not found in matchmaking queue");
+      }
+      
     } catch (err) {
       console.error("Poll error:", err);
+      // Continue polling even on errors
     }
   }
   
+  // Timeout - no match found
+  console.log("Match search timed out");
   return null;
 }
