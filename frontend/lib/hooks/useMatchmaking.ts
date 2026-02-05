@@ -13,7 +13,8 @@ import {
   DUEL_PROGRAM_ID, 
   TEE_RPC_URL, 
   TEE_WS_URL, 
-  ER_VALIDATOR 
+  ER_VALIDATOR,
+  QUEUE_AUTHORITY
 } from "@/lib/constants";
 import RPS_IDL from "@/lib/types/rps_game.json";
 import DUEL_IDL from "@1upmonster/duel/dist/duel.json";
@@ -86,10 +87,9 @@ export function useMatchmaking() {
       }
 
       // 4. Derive Queue and Tenant PDAs
-      // Queue authority is the RPS game program ID
-      const queueAuthority = RPS_GAME_PROGRAM_ID;
-      const [queuePda] = deriveQueuePda(queueAuthority, DUEL_PROGRAM_ID);
-      const [tenantPda] = deriveTenantPda(queueAuthority, DUEL_PROGRAM_ID);
+      // Queue authority is from the constants (the wallet that initialized the queue)
+      const [queuePda] = deriveQueuePda(QUEUE_AUTHORITY, DUEL_PROGRAM_ID);
+      const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY, DUEL_PROGRAM_ID);
 
       console.log("Queue PDA:", queuePda.toBase58());
       console.log("Tenant PDA:", tenantPda.toBase58());

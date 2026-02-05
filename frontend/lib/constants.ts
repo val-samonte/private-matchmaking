@@ -32,6 +32,8 @@ export const RPC_ENDPOINTS = {
   mainnet: "https://api.mainnet-beta.solana.com",
 } as const;
 
-// Queue Authority (from tests - this should be the same authority used to initialize the queue)
-// In production, this would be derived or fetched from the program
-export const QUEUE_AUTHORITY = new PublicKey("11111111111111111111111111111111"); // Placeholder - will be set dynamically
+// Queue Authority (the wallet that initialized the queue)
+// This must match the authority used when running `anchor run init-queue`
+export const QUEUE_AUTHORITY = new PublicKey(
+  process.env.NEXT_PUBLIC_QUEUE_AUTHORITY || "Fh68kkXwFDubEdkRRBuWCXBdTr2YtnM52ASA7fxHrbCw"
+);
