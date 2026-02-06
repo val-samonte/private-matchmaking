@@ -1,122 +1,65 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useCallback, useState, useRef } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { useAtomValue } from "jotai";
-import { PublicKey } from "@solana/web3.js";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
-import { getTeeAuthToken, createTeeProvider, waitForDelegation } from "@/lib/utils/tee";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
-import { deriveQueuePda, deriveTenantPda } from "@/lib/utils/pda";
-import { 
-  RPS_GAME_PROGRAM_ID,
-  DUEL_PROGRAM_ID, 
-  TEE_RPC_URL, 
-  TEE_WS_URL, 
-  ER_VALIDATOR,
-  QUEUE_AUTHORITY
-} from "@/lib/constants";
-import RPS_IDL from "@/lib/types/rps_game.json";
-import DUEL_IDL from "@1upmonster/duel/dist/duel.json";
-import type { RpsGame } from "@/lib/types/rps_game_idl";
-import type { Duel } from "@/lib/types/duel_idl";
 
-export type MatchmakingState = 
-  | "idle" 
-  | "authenticating" 
-  | "delegating" 
-  | "joining" 
-  | "searching" 
-  | "matched" 
-  | "error";
+type MatchmakingState = "idle" | "joining" | "searching" | "matched" | "error";
 
-export interface MatchResult {
-  opponent: PublicKey;
-  gameId: number;
-}
+type MatchResult = {
+  opponent: string;
+  gameId: string;
+  role: "player1" | "player2";
+};
 
 export function useMatchmaking() {
   const wallet = useWallet();
-  const { connection } = useConnection();
   const profilePda = useAtomValue(playerProfilePdaAtom);
   
   const [state, setState] = useState<MatchmakingState>("idle");
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const findMatch = useCallback(async () => {
     if (!wallet.publicKey || !profilePda) {
       throw new Error("Wallet not connected or profile not found");
     }
 
+    // Create abort controller for this search
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
     try {
-      setState("authenticating");
+      setState("joining");
       setError(null);
 
-      // 1. Get TEE Auth Token
-      console.log("Getting TEE auth token...");
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
+      console.log("Joining matchmaking queue via API...");
       
-      // 2. Create TEE Provider
-      const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, wallet);
-      
-      // 3. Delegate Profile PDA (if not already delegated)
-      setState("delegating");
-      console.log("Delegating profile PDA...");
-      
-      const l1Provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
-      const rpsProgram = new Program(RPS_IDL as any, l1Provider) as Program<RpsGame>;
-      
-      try {
-        await rpsProgram.methods
-          .delegatePda({ playerProfile: { player: wallet.publicKey } })
-          .accounts({
-            pda: profilePda,
-            payer: wallet.publicKey,
-            validator: ER_VALIDATOR,
-          } as any)
-          .rpc();
-        
-        // Wait for delegation
-        console.log("Waiting for profile delegation...");
-        await waitForDelegation(TEE_RPC_URL, token, profilePda);
-        console.log("Profile delegated successfully");
-      } catch (err: any) {
-        // Already delegated or other error - continue
-        console.log("Delegation status:", err.message);
+      // Call backend API to join queue
+      const joinResponse = await fetch("/api/matchmaking/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerPubkey: wallet.publicKey.toBase58(),
+          profilePda: profilePda.toBase58(),
+        }),
+      });
+
+      if (!joinResponse.ok) {
+        const errorData = await joinResponse.json();
+        throw new Error(errorData.error || "Failed to join queue");
       }
 
-      // 4. Derive Queue and Tenant PDAs
-      // Queue authority is from the constants (the wallet that initialized the queue)
-      const [queuePda] = deriveQueuePda(QUEUE_AUTHORITY, DUEL_PROGRAM_ID);
-      const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY, DUEL_PROGRAM_ID);
+      const joinData = await joinResponse.json();
+      console.log("✅ Joined queue:", joinData);
 
-      console.log("Queue PDA:", queuePda.toBase58());
-      console.log("Tenant PDA:", tenantPda.toBase58());
-
-      // 5. Join Queue using TEE provider
-      setState("joining");
-      console.log("Joining matchmaking queue...");
-      
-      const duelProgram = new Program(DUEL_IDL as any, teeProvider) as Program<Duel>;
-      
-      await duelProgram.methods
-        .joinQueue()
-        .accountsPartial({
-          queue: queuePda,
-          tenant: tenantPda,
-          playerData: profilePda,
-          signer: wallet.publicKey,
-        })
-        .rpc();
-
-      console.log("Joined queue successfully");
-
-      // 6. Poll for match
+      // Poll for match
       setState("searching");
       console.log("Searching for opponent...");
       
-      const match = await pollForMatch(duelProgram, queuePda, wallet.publicKey);
+      const match = await pollForMatchViaAPI(wallet.publicKey.toBase58(), signal);
       
       if (match) {
         setMatchResult(match);
@@ -128,122 +71,83 @@ export function useMatchmaking() {
       }
 
     } catch (err: any) {
+      if (err.message === "Search cancelled") {
+        console.log("Match search cancelled by user");
+        setState("idle");
+        return null;
+      }
       console.error("Matchmaking error:", err);
       setError(err.message || "Failed to find match");
       setState("error");
       throw err;
     }
-  }, [wallet, connection, profilePda]);
+  }, [wallet, profilePda]);
 
   const cancelSearch = useCallback(() => {
     setState("idle");
     setMatchResult(null);
-    setError(null);
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      console.log("Cancelling match search...");
+    }
   }, []);
 
   const reset = useCallback(() => {
     setState("idle");
     setMatchResult(null);
-    setError(null);
   }, []);
 
   return {
+    findMatch,
+    cancelSearch,
     state,
     matchResult,
     error,
-    findMatch,
-    cancelSearch,
     reset,
   };
 }
 
-// Helper to poll queue for match
-async function pollForMatch(
-  duelProgram: Program<Duel>,
-  queuePda: PublicKey,
-  playerPubkey: PublicKey,
+// Helper to poll queue for match via API
+async function pollForMatchViaAPI(
+  playerPubkey: string,
+  signal?: AbortSignal,
   maxAttempts = 60, // 2 minutes (2s intervals)
   pollInterval = 2000
 ): Promise<MatchResult | null> {
-  
-  let previousQueueState: any = null;
-  let playerWasInQueue = false; // Track if we've ever seen the player in the queue
-  
   for (let i = 0; i < maxAttempts; i++) {
+    // Check if cancelled
+    if (signal?.aborted) {
+      console.log("Polling cancelled");
+      return null;
+    }
+    
     await new Promise(resolve => setTimeout(resolve, pollInterval));
     
     try {
-      const queueAccount = await duelProgram.account.queue.fetch(queuePda);
+      const response = await fetch(`/api/matchmaking/poll?playerPubkey=${playerPubkey}`);
       
-      // Find my entry in the queue
-      const myEntry = queueAccount.entries.find((entry: any) => 
-        entry.player.equals(playerPubkey)
-      );
-      
-      // Case 1: I'm in the queue
-      if (myEntry) {
-        playerWasInQueue = true; // Mark that we've seen the player
-        console.log(`Polling attempt ${i + 1}/${maxAttempts} - still in queue (${queueAccount.entries.length} total)`);
-        previousQueueState = queueAccount;
+      if (!response.ok) {
+        console.error("Poll error:", await response.text());
         continue;
       }
+
+      const data = await response.json();
       
-      // Case 2: I'm NOT in the queue
-      if (!myEntry) {
-        // Sub-case 2a: I was never in the queue yet (still waiting for joinQueue to settle)
-        if (!playerWasInQueue) {
-          console.log(`Polling attempt ${i + 1}/${maxAttempts} - waiting for player to appear in queue...`);
-          continue;
-        }
-        
-        // Sub-case 2b: I WAS in the queue before, but now I'm not - MATCH FOUND!
-        if (playerWasInQueue && previousQueueState) {
-          console.log("Player removed from queue - match found!");
-          
-          // Try to find who I was matched with by comparing queue states
-          const previousPlayers = previousQueueState.entries.map((e: any) => e.player.toBase58());
-          const currentPlayers = queueAccount.entries.map((e: any) => e.player.toBase58());
-          
-          // Find players that were removed (should be 2: me and opponent)
-          const removedPlayers = previousPlayers.filter((p: string) => !currentPlayers.includes(p));
-          
-          // The opponent is the removed player that's not me
-          const opponentPubkeyStr = removedPlayers.find((p: string) => p !== playerPubkey.toBase58());
-          
-          if (opponentPubkeyStr) {
-            const opponent = new PublicKey(opponentPubkeyStr);
-            const gameId = Date.now();
-            
-            console.log("Matched with opponent:", opponent.toBase58());
-            
-            return {
-              opponent,
-              gameId,
-            };
-          } else {
-            // Couldn't determine opponent - this shouldn't happen
-            console.warn("Could not determine opponent from queue state");
-            console.warn("Previous players:", previousPlayers);
-            console.warn("Current players:", currentPlayers);
-            console.warn("Removed players:", removedPlayers);
-            
-            // Don't return a fake match - throw error instead
-            throw new Error("Match detected but opponent could not be determined");
-          }
-        }
+      console.log(`Polling (${i + 1}/${maxAttempts}):`, data.status, `(${data.queueLength} in queue)`);
+      
+      if (data.status === "matched") {
+        // Player was matched!
+        return {
+          opponent: "matched", // TODO: Get actual opponent from match result
+          gameId: "game123", // TODO: Get actual game ID
+        };
       }
       
+      // Still searching...
     } catch (err) {
       console.error("Poll error:", err);
-      // For critical errors, rethrow
-      if (err instanceof Error && err.message.includes("opponent could not be determined")) {
-        throw err;
-      }
-      // For other errors, continue polling
     }
   }
   
-  // Timeout - no match found
-  console.log("Match search timed out - no opponent found");
-  return null;
+  return null; // Timeout
 }

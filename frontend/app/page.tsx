@@ -19,10 +19,12 @@ export default function HomePage() {
   const [pageState, setPageState] = useState<PageState>("menu");
   const [opponent, setOpponent] = useState<PublicKey | null>(null);
   const [gameId, setGameId] = useState<number | null>(null);
+  const [role, setRole] = useState<"player1" | "player2" | null>(null);
 
-  const handleMatchFound = (opponentPubkey: PublicKey, newGameId: number) => {
+  const handleMatchFound = (opponentPubkey: PublicKey, newGameId: number, playerRole: "player1" | "player2") => {
     setOpponent(opponentPubkey);
     setGameId(newGameId);
+    setRole(playerRole);
     setPageState("game");
   };
 
@@ -30,6 +32,7 @@ export default function HomePage() {
     setPageState("menu");
     setOpponent(null);
     setGameId(null);
+    setRole(null);
   };
 
   return (
@@ -50,6 +53,7 @@ export default function HomePage() {
           <GameBoard 
             opponent={opponent} 
             gameId={gameId} 
+            role={role!}
             onGameComplete={handleGameComplete}
           />
         ) : (

@@ -8,10 +8,11 @@ import { Choice, getWinner, isTie, formatAddress } from "@/lib/types/rps";
 interface GameBoardProps {
   opponent: PublicKey;
   gameId: number;
+  role: "player1" | "player2";
   onGameComplete: () => void;
 }
 
-export function GameBoard({ opponent, gameId, onGameComplete }: GameBoardProps) {
+export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardProps) {
   const { 
     gameState, 
     playerChoice, 
@@ -27,9 +28,9 @@ export function GameBoard({ opponent, gameId, onGameComplete }: GameBoardProps) 
   // Auto-start game when component mounts
   useEffect(() => {
     if (gameState === "idle") {
-      startGame(opponent, gameId);
+      startGame(opponent, gameId, role);
     }
-  }, [gameState, opponent, gameId, startGame]);
+  }, [gameState, opponent, gameId, role, startGame]);
 
   const handleChoiceClick = async (choice: Choice) => {
     if (gameState !== "ready") return;

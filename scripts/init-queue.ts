@@ -4,6 +4,8 @@ import { Duel } from "../target/types/duel";
 import { RpsGame } from "../target/types/rps_game";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { MatchmakingAdmin } from "../sdk/src";
+import * as fs from "fs";
+import * as path from "path";
 
 /**
  * Initialize the matchmaking queue and tenant for the RPS game
@@ -19,10 +21,24 @@ async function main() {
   console.log("Initializing Matchmaking Infrastructure...");
   console.log("");
 
-  // Use the wallet as the queue authority (not the program ID)
-  // The wallet will be the admin who can manage the queue
-  const wallet = (provider.wallet as anchor.Wallet).payer;
-  const queueAuthority = wallet.publicKey;
+  // Check if tenant authority keypair file exists
+  const tenantKeypairPath = path.join(__dirname, "../.tenant-authority.json");
+  let wallet: Keypair;
+  let queueAuthority: PublicKey;
+  
+  if (fs.existsSync(tenantKeypairPath)) {
+    // Use dedicated tenant authority
+    const keypairData = JSON.parse(fs.readFileSync(tenantKeypairPath, "utf-8"));
+    wallet = Keypair.fromSecretKey(new Uint8Array(keypairData));
+    queueAuthority = wallet.publicKey;
+    console.log("Using dedicated tenant authority keypair");
+  } else {
+    // Use wallet from provider (your personal wallet)
+    wallet = (provider.wallet as anchor.Wallet).payer;
+    queueAuthority = wallet.publicKey;
+    console.log("Using wallet as tenant authority");
+  }
+  
   
   const [queuePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("queue"), queueAuthority.toBuffer()],

@@ -138,6 +138,8 @@ pub mod duel {
 
                 if diff <= window {
                     // Match found!
+                    let timestamp = Clock::get()?.unix_timestamp;
+
                     msg!(
                         "Auto-Match Found: {} (ELO {}) vs {} (ELO {})",
                         new_player.player,
@@ -145,6 +147,27 @@ pub mod duel {
                         other_player.player,
                         other_player.elo
                     );
+
+                    // Emit event
+                    emit!(MatchFound {
+                        player1: new_player.player,
+                        player2: other_player.player,
+                        timestamp,
+                    });
+
+                    // Store in matches list (keep last 10)
+                    let match_entry = MatchEntry {
+                        player1: new_player.player,
+                        player2: other_player.player,
+                        timestamp,
+                    };
+
+                    queue.matches.push(match_entry);
+
+                    // Keep only last 10 matches
+                    if queue.matches.len() > 10 {
+                        queue.matches.remove(0);
+                    }
 
                     // Remove both players from queue (remove higher index first)
                     queue.entries.remove(new_player_idx);
@@ -218,12 +241,27 @@ pub struct JoinQueue<'info> {
     pub signer: Signer<'info>,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
+pub struct MatchEntry {
+    pub player1: Pubkey,
+    pub player2: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct MatchFound {
+    pub player1: Pubkey,
+    pub player2: Pubkey,
+    pub timestamp: i64,
+}
+
 #[account]
 pub struct Queue {
     pub authority: Pubkey,
     pub tenant: Pubkey,
     pub bump: u8,
     pub entries: Vec<QueueEntry>,
+    pub matches: Vec<MatchEntry>, // Store recent matches for visibility
 }
 
 #[account]
@@ -240,7 +278,8 @@ impl Tenant {
 }
 
 impl Queue {
-    pub const LEN: usize = 32 + 32 + 4 + 1 + 64 + (100 * 40);
+    // Increased size to hold matches
+    pub const LEN: usize = 32 + 32 + 4 + 1 + 64 + (100 * 40) + (10 * 72);
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]

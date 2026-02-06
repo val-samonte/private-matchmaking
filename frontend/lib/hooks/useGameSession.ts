@@ -43,7 +43,7 @@ export function useGameSession() {
   const [result, setResult] = useState<GameResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const startGame = useCallback(async (opponentPubkey: PublicKey, newGameId: number) => {
+  const startGame = useCallback(async (opponentPubkey: PublicKey, newGameId: number, role: "player1" | "player2") => {
     if (!wallet.publicKey || !profilePda) {
       throw new Error("Wallet not connected or profile not found");
     }
@@ -56,62 +56,70 @@ export function useGameSession() {
       const gameIdBN = new BN(newGameId);
       setGameId(gameIdBN);
 
-      console.log("Starting game...");
+      console.log(`Starting game as ${role}...`);
       console.log("Game ID:", newGameId);
       console.log("Opponent:", opponentPubkey.toBase58());
 
       // 1. Derive game session PDA
       const [sessionPda] = deriveGameSessionPda(
-        wallet.publicKey,
-        opponentPubkey,
+        role === "player1" ? wallet.publicKey : opponentPubkey,
+        role === "player1" ? opponentPubkey : wallet.publicKey,
         gameIdBN,
         RPS_GAME_PROGRAM_ID
       );
       setGameSessionPda(sessionPda);
       console.log("Game Session PDA:", sessionPda.toBase58());
 
-      // 2. Start game on L1
-      const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
-      const program = new Program(IDL as any, provider) as Program<RpsGame>;
-      
-      console.log("Calling startGame instruction...");
-      await program.methods
-        .startGame(gameIdBN, opponentPubkey)
-        .accounts({
-          player: wallet.publicKey,
-        } as any)
-        .rpc();
-      
-      console.log("Game started on L1");
+      if (role === "player1") {
+        // PLAYER 1: Create and Delegate
+        const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
+        const program = new Program(IDL as any, provider) as Program<RpsGame>;
+        
+        console.log("P1: Calling startGame instruction...");
+        await program.methods
+          .startGame(gameIdBN, opponentPubkey)
+          .accounts({
+            player: wallet.publicKey,
+          } as any)
+          .rpc();
+        
+        console.log("P1: Game started on L1");
 
-      // 3. Delegate game session
-      setGameState("delegating");
-      console.log("Delegating game session...");
-      
-      await program.methods
-        .delegatePda({ 
-          gameSession: { 
-            p1: wallet.publicKey, 
-            p2: opponentPubkey, 
-            id: gameIdBN 
-          } 
-        })
-        .accounts({
-          pda: sessionPda,
-          payer: wallet.publicKey,
-          validator: ER_VALIDATOR,
-        } as any)
-        .rpc();
+        // Delegate game session
+        setGameState("delegating");
+        console.log("P1: Delegating game session...");
+        
+        await program.methods
+          .delegatePda({ 
+            gameSession: { 
+              p1: wallet.publicKey, 
+              p2: opponentPubkey, 
+              id: gameIdBN 
+            } 
+          })
+          .accounts({
+            pda: sessionPda,
+            payer: wallet.publicKey,
+            validator: ER_VALIDATOR,
+          } as any)
+          .rpc();
+      } else {
+        // PLAYER 2: Wait for delegation
+        console.log("P2: Waiting for P1 to create and delegate game...");
+        setGameState("delegating"); // Re-use delegating state for waiting
+      }
 
-      // 4. Wait for delegation
+      // Both players wait for delegation to be active
       const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
-      console.log("Waiting for game session delegation...");
+      console.log("Waiting for game session delegation propagation...");
       await waitForDelegation(TEE_RPC_URL, token, sessionPda);
-      console.log("Game session delegated successfully");
+      console.log("Game session delegated and active!");
 
       setGameState("ready");
     } catch (err: any) {
       console.error("Start game error:", err);
+      // If P2 and error is "Account not initialized" maybe wait more? 
+      // But waitForDelegation handles retries.
       setError(err.message || "Failed to start game");
       setGameState("error");
       throw err;

@@ -4,7 +4,7 @@ import { useMatchmaking } from "@/lib/hooks/useMatchmaking";
 import { PublicKey } from "@solana/web3.js";
 
 interface MatchmakingButtonProps {
-  onMatchFound: (opponent: PublicKey, gameId: number) => void;
+  onMatchFound: (opponent: PublicKey, gameId: number, role: "player1" | "player2") => void;
 }
 
 export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
@@ -17,7 +17,7 @@ export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
       try {
         const match = await findMatch();
         if (match) {
-          onMatchFound(match.opponent, match.gameId);
+          onMatchFound(new PublicKey(match.opponent), parseInt(match.gameId), match.role);
         }
       } catch (err) {
         console.error("Matchmaking error:", err);

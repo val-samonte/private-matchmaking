@@ -427,6 +427,28 @@ export type Duel = {
       "msg": "Invalid ELO size (must be 1, 2, 4, or 8 bytes)"
     }
   ],
+  "events": [
+    {
+      "name": "matchFound",
+      "fields": [
+        {
+          "name": "player1",
+          "type": "pubkey",
+          "index": false
+        },
+        {
+          "name": "player2",
+          "type": "pubkey",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    }
+  ],
   "types": [
     {
       "name": "accountType",
@@ -441,6 +463,26 @@ export type Duel = {
                 "type": "pubkey"
               }
             ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "matchEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player1",
+            "type": "pubkey"
+          },
+          {
+            "name": "player2",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }
@@ -468,6 +510,16 @@ export type Duel = {
               "vec": {
                 "defined": {
                   "name": "queueEntry"
+                }
+              }
+            }
+          },
+          {
+            "name": "matches",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "matchEntry"
                 }
               }
             }
