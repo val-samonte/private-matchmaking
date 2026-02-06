@@ -11,3 +11,14 @@ test_output_3.log
 test_output.log
 reference_baseline
 reference_baseline
+
+# Sensitive Keys & Environment
+.tenant-authority.json
+.env
+.env.local
+.env.*.local
+*.json
+
+# Wallet backups
+id.json
+wallet.json
