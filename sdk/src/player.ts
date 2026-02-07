@@ -1,9 +1,8 @@
 import * as anchor from "@coral-xyz/anchor";
 import * as web3 from "@solana/web3.js";
-import type { Duel } from "./types.js";
-import { createRequire } from "module";
-const IDL = createRequire(import.meta.url)("./duel.json");
-import * as utils from "./utils.js";
+import type { Duel } from "./types.ts";
+import IDL from "./duel.json" with { type: "json" };
+import * as utils from "./utils.ts";
 
 export class MatchmakingPlayer {
   public program: anchor.Program<Duel>;
