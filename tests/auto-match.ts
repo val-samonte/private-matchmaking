@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
-import type { RpsGame } from "../target/types/rps_game.ts";
-import type { Duel } from "../target/types/duel.ts";
+import type { RpsGame } from "../target/types/rps_game";
+import type { Duel } from "../target/types/duel";
 import * as web3 from "@solana/web3.js";
 
 import { assert } from "chai";
@@ -12,9 +12,9 @@ import {
 import nacl from "tweetnacl";
 import { BN } from "bn.js";
 import * as crypto from "crypto";
-import { MatchmakingAdmin } from "../sdk/src/admin.ts";
-import { MatchmakingPlayer } from "../sdk/src/player.ts";
-import * as sdk from "../sdk/src/index.ts";
+import { MatchmakingAdmin } from "../sdk/src/admin.js";
+import { MatchmakingPlayer } from "../sdk/src/player.js";
+import * as sdk from "../sdk/src/index.js";
 
 describe("web3-matchmaking-with-tickets", () => {
   const provider = anchor.AnchorProvider.env();

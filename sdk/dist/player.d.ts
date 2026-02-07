@@ -1,4 +1,3 @@
-/// <reference types="bn.js" />
 import * as anchor from "@coral-xyz/anchor";
 import * as web3 from "@solana/web3.js";
 import type { Duel } from "./types.js";

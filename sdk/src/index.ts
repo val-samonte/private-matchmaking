@@ -1,4 +1,4 @@
-export * from "./admin.ts";
-export * from "./player.ts";
-export * from "./types.ts";
-export * as utils from "./utils.ts";
+export * from "./admin.js";
+export * from "./player.js";
+export * from "./types.js";
+export * as utils from "./utils.js";

@@ -7,6 +7,207 @@
     },
     "instructions": [
         {
+            "name": "cancel_ticket",
+            "docs": [
+                "Player cancels search, marks ticket as Cancelled (runs in TEE)"
+            ],
+            "discriminator": [
+                216,
+                28,
+                247,
+                206,
+                195,
+                171,
+                100,
+                143
+            ],
+            "accounts": [
+                {
+                    "name": "ticket",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    105,
+                                    99,
+                                    107,
+                                    101,
+                                    116
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "player"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "tenant"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "tenant"
+                },
+                {
+                    "name": "player",
+                    "signer": true
+                }
+            ],
+            "args": []
+        },
+        {
+            "name": "close_ticket",
+            "docs": [
+                "Reclaim rent after match consumed or cancelled (L1)"
+            ],
+            "discriminator": [
+                66,
+                209,
+                114,
+                197,
+                75,
+                27,
+                182,
+                117
+            ],
+            "accounts": [
+                {
+                    "name": "ticket",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    105,
+                                    99,
+                                    107,
+                                    101,
+                                    116
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "player"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "tenant"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "tenant"
+                },
+                {
+                    "name": "player",
+                    "writable": true,
+                    "signer": true
+                }
+            ],
+            "args": []
+        },
+        {
+            "name": "commit_tickets",
+            "docs": [
+                "Commit matched tickets back to L1 (runs in TEE, uses #[commit])"
+            ],
+            "discriminator": [
+                245,
+                199,
+                81,
+                0,
+                62,
+                133,
+                18,
+                22
+            ],
+            "accounts": [
+                {
+                    "name": "tenant"
+                },
+                {
+                    "name": "payer",
+                    "writable": true,
+                    "signer": true
+                },
+                {
+                    "name": "magic_program",
+                    "address": "Magic11111111111111111111111111111111111111"
+                },
+                {
+                    "name": "magic_context",
+                    "writable": true,
+                    "address": "MagicContext1111111111111111111111111111111"
+                }
+            ],
+            "args": []
+        },
+        {
+            "name": "create_ticket",
+            "docs": [
+                "Player creates a MatchTicket PDA on L1"
+            ],
+            "discriminator": [
+                16,
+                178,
+                122,
+                25,
+                213,
+                85,
+                96,
+                129
+            ],
+            "accounts": [
+                {
+                    "name": "ticket",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    105,
+                                    99,
+                                    107,
+                                    101,
+                                    116
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "player"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "tenant"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "tenant"
+                },
+                {
+                    "name": "player",
+                    "writable": true,
+                    "signer": true
+                },
+                {
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
+                }
+            ],
+            "args": []
+        },
+        {
             "name": "delegate_queue",
             "discriminator": [
                 31,
@@ -188,6 +389,221 @@
             ]
         },
         {
+            "name": "delegate_ticket",
+            "docs": [
+                "Player delegates their ticket into TEE (becomes invisible on L1)"
+            ],
+            "discriminator": [
+                195,
+                3,
+                78,
+                64,
+                128,
+                235,
+                209,
+                171
+            ],
+            "accounts": [
+                {
+                    "name": "buffer_pda",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    98,
+                                    117,
+                                    102,
+                                    102,
+                                    101,
+                                    114
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "pda"
+                            }
+                        ],
+                        "program": {
+                            "kind": "const",
+                            "value": [
+                                202,
+                                134,
+                                36,
+                                108,
+                                174,
+                                148,
+                                252,
+                                73,
+                                211,
+                                125,
+                                15,
+                                66,
+                                178,
+                                45,
+                                134,
+                                44,
+                                37,
+                                1,
+                                240,
+                                164,
+                                105,
+                                155,
+                                163,
+                                192,
+                                243,
+                                31,
+                                80,
+                                29,
+                                128,
+                                104,
+                                246,
+                                134
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "delegation_record_pda",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    100,
+                                    101,
+                                    108,
+                                    101,
+                                    103,
+                                    97,
+                                    116,
+                                    105,
+                                    111,
+                                    110
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "pda"
+                            }
+                        ],
+                        "program": {
+                            "kind": "account",
+                            "path": "delegation_program"
+                        }
+                    }
+                },
+                {
+                    "name": "delegation_metadata_pda",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    100,
+                                    101,
+                                    108,
+                                    101,
+                                    103,
+                                    97,
+                                    116,
+                                    105,
+                                    111,
+                                    110,
+                                    45,
+                                    109,
+                                    101,
+                                    116,
+                                    97,
+                                    100,
+                                    97,
+                                    116,
+                                    97
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "pda"
+                            }
+                        ],
+                        "program": {
+                            "kind": "account",
+                            "path": "delegation_program"
+                        }
+                    }
+                },
+                {
+                    "name": "pda",
+                    "writable": true
+                },
+                {
+                    "name": "payer",
+                    "writable": true,
+                    "signer": true
+                },
+                {
+                    "name": "validator",
+                    "optional": true
+                },
+                {
+                    "name": "owner_program",
+                    "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X"
+                },
+                {
+                    "name": "delegation_program",
+                    "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+                },
+                {
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
+                }
+            ],
+            "args": [
+                {
+                    "name": "account_type",
+                    "type": {
+                        "defined": {
+                            "name": "AccountType"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "flush_matches",
+            "docs": [
+                "Flush pending matches: update opponent tickets and commit to L1",
+                "Can be called by any TEE-authenticated wallet (permissionless crank)"
+            ],
+            "discriminator": [
+                49,
+                148,
+                163,
+                71,
+                77,
+                63,
+                197,
+                76
+            ],
+            "accounts": [
+                {
+                    "name": "queue",
+                    "writable": true
+                },
+                {
+                    "name": "tenant"
+                },
+                {
+                    "name": "signer",
+                    "signer": true
+                }
+            ],
+            "args": []
+        },
+        {
             "name": "initialize_queue",
             "discriminator": [
                 174,
@@ -299,11 +715,31 @@
                 {
                     "name": "elo_window",
                     "type": "u64"
+                },
+                {
+                    "name": "callback_program_id",
+                    "type": {
+                        "option": "pubkey"
+                    }
+                },
+                {
+                    "name": "callback_discriminator",
+                    "type": {
+                        "option": {
+                            "array": [
+                                "u8",
+                                8
+                            ]
+                        }
+                    }
                 }
             ]
         },
         {
             "name": "join_queue",
+            "docs": [
+                "Modified join_queue: now requires player's MatchTicket"
+            ],
             "discriminator": [
                 157,
                 115,
@@ -325,6 +761,33 @@
                 {
                     "name": "player_data",
                     "writable": true
+                },
+                {
+                    "name": "player_ticket",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    105,
+                                    99,
+                                    107,
+                                    101,
+                                    116
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "signer"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "tenant"
+                            }
+                        ]
+                    }
                 },
                 {
                     "name": "signer",
@@ -373,6 +836,19 @@
     ],
     "accounts": [
         {
+            "name": "MatchTicket",
+            "discriminator": [
+                11,
+                131,
+                4,
+                157,
+                207,
+                79,
+                126,
+                5
+            ]
+        },
+        {
             "name": "Queue",
             "discriminator": [
                 204,
@@ -399,6 +875,21 @@
             ]
         }
     ],
+    "events": [
+        {
+            "name": "MatchFound",
+            "discriminator": [
+                73,
+                161,
+                70,
+                145,
+                232,
+                249,
+                72,
+                211
+            ]
+        }
+    ],
     "errors": [
         {
             "code": 6000,
@@ -419,6 +910,21 @@
             "code": 6003,
             "name": "InvalidEloSize",
             "msg": "Invalid ELO size (must be 1, 2, 4, or 8 bytes)"
+        },
+        {
+            "code": 6004,
+            "name": "InvalidTicketStatus",
+            "msg": "Invalid ticket status for this operation"
+        },
+        {
+            "code": 6005,
+            "name": "InvalidTicketAccount",
+            "msg": "Invalid ticket account"
+        },
+        {
+            "code": 6006,
+            "name": "MissingCallbackProgram",
+            "msg": "Missing or invalid callback program in remaining accounts"
         }
     ],
     "types": [
@@ -435,6 +941,119 @@
                                 "type": "pubkey"
                             }
                         ]
+                    },
+                    {
+                        "name": "Ticket",
+                        "fields": [
+                            {
+                                "name": "player",
+                                "type": "pubkey"
+                            },
+                            {
+                                "name": "tenant",
+                                "type": "pubkey"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "name": "MatchEntry",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "player1",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "player2",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "match_id",
+                        "type": "u64"
+                    },
+                    {
+                        "name": "timestamp",
+                        "type": "i64"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "MatchFound",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "player1",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "player2",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "match_id",
+                        "type": "u64"
+                    },
+                    {
+                        "name": "timestamp",
+                        "type": "i64"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "MatchTicket",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "player",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "tenant",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "status",
+                        "type": {
+                            "defined": {
+                                "name": "TicketStatus"
+                            }
+                        }
+                    },
+                    {
+                        "name": "created_at",
+                        "type": "i64"
+                    },
+                    {
+                        "name": "bump",
+                        "type": "u8"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "PendingMatch",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "player",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "opponent",
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "match_id",
+                        "type": "u64"
                     }
                 ]
             }
@@ -457,11 +1076,35 @@
                         "type": "u8"
                     },
                     {
+                        "name": "match_counter",
+                        "type": "u64"
+                    },
+                    {
                         "name": "entries",
                         "type": {
                             "vec": {
                                 "defined": {
                                     "name": "QueueEntry"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "matches",
+                        "type": {
+                            "vec": {
+                                "defined": {
+                                    "name": "MatchEntry"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "pending_matches",
+                        "type": {
+                            "vec": {
+                                "defined": {
+                                    "name": "PendingMatch"
                                 }
                             }
                         }
@@ -509,6 +1152,53 @@
                     {
                         "name": "elo_window",
                         "type": "u64"
+                    },
+                    {
+                        "name": "callback_program_id",
+                        "type": {
+                            "option": "pubkey"
+                        }
+                    },
+                    {
+                        "name": "callback_discriminator",
+                        "type": {
+                            "option": {
+                                "array": [
+                                    "u8",
+                                    8
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "TicketStatus",
+            "type": {
+                "kind": "enum",
+                "variants": [
+                    {
+                        "name": "Searching"
+                    },
+                    {
+                        "name": "Matched",
+                        "fields": [
+                            {
+                                "name": "opponent",
+                                "type": "pubkey"
+                            },
+                            {
+                                "name": "match_id",
+                                "type": "u64"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "Expired"
+                    },
+                    {
+                        "name": "Cancelled"
                     }
                 ]
             }
