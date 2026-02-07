@@ -1,8 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { RpsGame } from "../target/types/rps_game";
-import { Duel } from "../target/types/duel";
-import { Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import type { RpsGame } from "../target/types/rps_game.ts";
+import type { Duel } from "../target/types/duel.ts";
+import * as web3 from "@solana/web3.js";
 
 import { assert } from "chai";
 
@@ -10,59 +9,63 @@ import {
   getAuthToken,
   waitUntilPermissionActive,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
-import * as nacl from "tweetnacl";
+import nacl from "tweetnacl";
+import { BN } from "bn.js";
 import * as crypto from "crypto";
-import { MatchmakingAdmin, MatchmakingPlayer } from "../sdk/src";
+import { MatchmakingAdmin } from "../sdk/src/admin.ts";
+import { MatchmakingPlayer } from "../sdk/src/player.ts";
+import * as sdk from "../sdk/src/index.ts";
 
 describe("web3-matchmaking-with-tickets", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const rpsGame = anchor.workspace.RpsGame as Program<RpsGame>;
-  const privateMatchmaking = anchor.workspace.Duel as Program<Duel>;
+  const rpsGame = anchor.workspace.RpsGame as anchor.Program<RpsGame>;
+  const privateMatchmaking = anchor.workspace.Duel as anchor.Program<Duel>;
 
   // Seeds
-  const queueSeed = Buffer.from("queue");
-  const ticketSeed = Buffer.from("ticket");
+  // const queueSeed = Buffer.from("queue"); // Moved to SDK
+  const ticketSeed = Buffer.from("ticket"); // Moved to SDK
   const playerProfileSeed = Buffer.from("player_profile_v35");
 
   // Hardcoded Validator from Reference
-  const ER_VALIDATOR = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
+  const ER_VALIDATOR = new web3.PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
 
   // TEE Configuration
   const TEE_RPC_URL = "https://tee.magicblock.app";
   const TEE_WS_URL = "wss://tee.magicblock.app";
 
-  const queueAuthority = Keypair.generate();
-  const [queuePda] = PublicKey.findProgramAddressSync(
-    [queueSeed, queueAuthority.publicKey.toBuffer()],
-    privateMatchmaking.programId
+  const queueAuthority = web3.Keypair.generate();
+  
+  // Use SDK utils for Queue PDA
+  const queuePda = sdk.utils.deriveQueuePda(
+     privateMatchmaking.programId, 
+    queueAuthority.publicKey
   );
 
-  const tenantSeed = Buffer.from("tenant");
-  const [tenantPda] = PublicKey.findProgramAddressSync(
-    [tenantSeed, queueAuthority.publicKey.toBuffer()],
-    privateMatchmaking.programId
+  // Use SDK utils for Tenant PDA
+  const tenantPda = sdk.utils.deriveTenantPda(
+    privateMatchmaking.programId, 
+    queueAuthority.publicKey
   );
 
-  const player1 = Keypair.generate();
-  const player2 = Keypair.generate();
+  const player1 = web3.Keypair.generate();
+  const player2 = web3.Keypair.generate();
 
-  // Derive ticket PDAs
-  const [p1TicketPda] = PublicKey.findProgramAddressSync(
-    [ticketSeed, player1.publicKey.toBuffer(), tenantPda.toBuffer()],
-    privateMatchmaking.programId
-  );
-  const [p2TicketPda] = PublicKey.findProgramAddressSync(
-    [ticketSeed, player2.publicKey.toBuffer(), tenantPda.toBuffer()],
-    privateMatchmaking.programId
-  );
+  // Derive ticket PDAs using SDK utils (MatchmakingPlayer)
+  // We can use the utility directly since we don't have the instance yet, 
+  // or we can simulate it. Let's use the raw utils from the SDK if exported, 
+  // or just use the class helper method pattern if not.
+  // Actually, we exported `utils` in index.ts, so let's import that.
+  
+  const p1TicketPda = new MatchmakingPlayer(provider, privateMatchmaking.programId).getTicketPda(player1.publicKey, tenantPda);
+  const p2TicketPda = new MatchmakingPlayer(provider, privateMatchmaking.programId).getTicketPda(player2.publicKey, tenantPda);
 
-  const [p1ProfilePda] = PublicKey.findProgramAddressSync(
+  const [p1ProfilePda] = web3.PublicKey.findProgramAddressSync(
     [playerProfileSeed, player1.publicKey.toBuffer()],
     rpsGame.programId
   );
-  const [p2ProfilePda] = PublicKey.findProgramAddressSync(
+  const [p2ProfilePda] = web3.PublicKey.findProgramAddressSync(
     [playerProfileSeed, player2.publicKey.toBuffer()],
     rpsGame.programId
   );
@@ -78,18 +81,18 @@ describe("web3-matchmaking-with-tickets", () => {
   let tokenQ: any;
 
   // Helpers
-  async function getTeeProgram(signer: Keypair, customProvider?: anchor.AnchorProvider): Promise<Program<RpsGame>> {
+  async function getTeeProgram(signer: web3.Keypair, customProvider?: anchor.AnchorProvider): Promise<anchor.Program<RpsGame>> {
     const p = customProvider || new anchor.AnchorProvider(new anchor.web3.Connection(TEE_RPC_URL), new anchor.Wallet(signer), { commitment: "confirmed" });
     return new anchor.Program(rpsGame.idl as any, p);
   }
 
-  async function getMatchmakingProgram(signer: Keypair, customProvider?: anchor.AnchorProvider): Promise<Program<Duel>> {
+  async function getMatchmakingProgram(signer: web3.Keypair, customProvider?: anchor.AnchorProvider): Promise<anchor.Program<Duel>> {
     const p = customProvider || new anchor.AnchorProvider(new anchor.web3.Connection(TEE_RPC_URL), new anchor.Wallet(signer), { commitment: "confirmed" });
     return new anchor.Program(privateMatchmaking.idl as any, p);
   }
 
   // Robust transaction sender
-  async function sendAndConfirmRobust(program: Program<any>, instructionPromise: Promise<any>, signers: Keypair[] = []) {
+  async function sendAndConfirmRobust(program: anchor.Program<any>, instructionPromise: Promise<any>, signers: web3.Keypair[] = []) {
     const provider = program.provider as anchor.AnchorProvider;
     const connection = provider.connection;
 
@@ -115,13 +118,13 @@ describe("web3-matchmaking-with-tickets", () => {
     while (!confirmed) {
       const currentHeight = await connection.getBlockHeight("confirmed");
       if (currentHeight > lastValidBlockHeight) {
-        throw new Error(`Transaction ${signature} expired without confirmation.`);
+        throw new Error(`web3.Transaction ${signature} expired without confirmation.`);
       }
 
       const status = await connection.getSignatureStatus(signature);
       if (status.value?.confirmationStatus === "confirmed" || status.value?.confirmationStatus === "finalized") {
         if (status.value.err) {
-          throw new Error(`Transaction ${signature} failed: ${JSON.stringify(status.value.err)}`);
+          throw new Error(`web3.Transaction ${signature} failed: ${JSON.stringify(status.value.err)}`);
         }
         confirmed = true;
         return signature;
@@ -141,10 +144,10 @@ describe("web3-matchmaking-with-tickets", () => {
 
   before("Setup and Fund", async () => {
     const payer = (provider.wallet as anchor.Wallet).payer;
-    await sendAndConfirmTransaction(provider.connection, new Transaction().add(
-      SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: player1.publicKey, lamports: 0.1 * 10 ** 9 }),
-      SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: player2.publicKey, lamports: 0.1 * 10 ** 9 }),
-      SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: queueAuthority.publicKey, lamports: 0.1 * 10 ** 9 })
+    await web3.sendAndConfirmTransaction(provider.connection, new web3.Transaction().add(
+      web3.SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: player1.publicKey, lamports: 0.1 * 10 ** 9 }),
+      web3.SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: player2.publicKey, lamports: 0.1 * 10 ** 9 }),
+      web3.SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: queueAuthority.publicKey, lamports: 0.1 * 10 ** 9 })
     ), [payer]);
 
     // Consistent confirm options matching MagicBlock reference examples
@@ -412,10 +415,10 @@ describe("web3-matchmaking-with-tickets", () => {
   });
 
   it("Play Game (Start & Moves)", async () => {
-    const gameId = new anchor.BN(1);
+    const gameId = new BN(1);
     const gameSessionSeed = Buffer.from("game_session_v1");
 
-    const [gameSessionPda] = PublicKey.findProgramAddressSync(
+    const [gameSessionPda] = web3.PublicKey.findProgramAddressSync(
       [
         gameSessionSeed,
         player1.publicKey.toBuffer(),
@@ -481,14 +484,14 @@ describe("web3-matchmaking-with-tickets", () => {
     console.log("Game Result:", JSON.stringify(sessionAccount.result));
 
     const winnerObj = sessionAccount.result as any;
-    let winnerPk: PublicKey | null = null;
+    let winnerPk: web3.PublicKey | null = null;
     if (winnerObj.winner) {
-      if (winnerObj.winner instanceof PublicKey) {
+      if (winnerObj.winner instanceof web3.PublicKey) {
         winnerPk = winnerObj.winner;
       } else if (winnerObj.winner['0']) {
-        winnerPk = new PublicKey(winnerObj.winner['0']);
+        winnerPk = new web3.PublicKey(winnerObj.winner['0']);
       } else if (Array.isArray(winnerObj.winner) && winnerObj.winner[0]) {
-        winnerPk = new PublicKey(winnerObj.winner[0]);
+        winnerPk = new web3.PublicKey(winnerObj.winner[0]);
       }
     }
 
@@ -503,13 +506,13 @@ describe("web3-matchmaking-with-tickets", () => {
     console.log(`P1 ELO (Loser 1000->${p1Profile.elo}): ${p1Profile.elo}`);
     console.log(`P2 ELO (Winner 1000->${p2Profile.elo}): ${p2Profile.elo}`);
 
-    assert.ok(p1Profile.elo.lt(new anchor.BN(1000)), "P1 ELO should decrease");
-    assert.ok(p2Profile.elo.gt(new anchor.BN(1000)), "P2 ELO should increase");
+    assert.ok(p1Profile.elo.lt(new BN(1000)), "P1 ELO should decrease");
+    assert.ok(p2Profile.elo.gt(new BN(1000)), "P2 ELO should increase");
   });
 
   it("Third-party can read MatchTicket PDA on L1 to verify match", async () => {
     // Derive ticket PDAs the same way a third-party would
-    const [derivedP1Ticket] = PublicKey.findProgramAddressSync(
+    const [derivedP1Ticket] = web3.PublicKey.findProgramAddressSync(
       [ticketSeed, player1.publicKey.toBuffer(), tenantPda.toBuffer()],
       privateMatchmaking.programId
     );

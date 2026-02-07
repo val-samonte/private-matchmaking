@@ -1,45 +1,36 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram, TransactionSignature, ConfirmOptions, Keypair, Connection, AccountInfo } from "@solana/web3.js";
-import { Duel } from "./types";
-import IDL from "./duel.json";
-
-const TICKET_SEED = "ticket";
+import * as web3 from "@solana/web3.js";
+import type { Duel } from "./types.ts";
+import { createRequire } from "module";
+const IDL = createRequire(import.meta.url)("./duel.json");
+import * as utils from "./utils.ts";
 
 export class MatchmakingPlayer {
-  program: Program<Duel>;
-  provider: AnchorProvider;
+  public program: anchor.Program<Duel>;
+  public provider: anchor.AnchorProvider;
 
-  constructor(provider: AnchorProvider, programId?: PublicKey) {
+  constructor(provider: anchor.AnchorProvider, programId: web3.PublicKey | string) {
+    const address = typeof programId === "string" ? programId : programId.toBase58();
+    const idl = { ...IDL, address };
+    this.program = new anchor.Program(idl as any, provider);
     this.provider = provider;
-    const PROGRAM_ID = programId || new PublicKey("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
-
-    // Override address in IDL
-    const modifiedIdl = { ...IDL } as any;
-    modifiedIdl.address = PROGRAM_ID.toBase58();
-
-    this.program = new Program(modifiedIdl, this.provider);
   }
 
   /**
    * Derive MatchTicket PDA
    */
-  getTicketPda(player: PublicKey, tenant: PublicKey): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
-      this.program.programId
-    );
-    return pda;
+  getTicketPda(player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
+    return utils.deriveTicketPda(this.program.programId, player, tenant);
   }
 
   /**
    * Create MatchTicket PDA on L1
    */
   async createTicket(
-    tenant: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    tenant: web3.PublicKey,
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
     return await this.program.methods
       .createTicket()
@@ -56,12 +47,12 @@ export class MatchmakingPlayer {
    * Delegate ticket into TEE (becomes invisible on L1)
    */
   async delegateTicket(
-    player: PublicKey,
-    tenant: PublicKey,
-    validator: PublicKey = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"),
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    player: web3.PublicKey,
+    tenant: web3.PublicKey,
+    validator: web3.PublicKey = new web3.PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"),
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const ticketPda = this.getTicketPda(player, tenant);
     return await this.program.methods
       .delegateTicket({ ticket: { player, tenant } } as any)
@@ -78,12 +69,12 @@ export class MatchmakingPlayer {
    * Join Queue (TEE Aware) - now requires ticket
    */
   async joinQueue(
-    queue: PublicKey,
-    tenant: PublicKey,
-    playerData: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    queue: web3.PublicKey,
+    tenant: web3.PublicKey,
+    playerData: web3.PublicKey,
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
     return await this.program.methods
       .joinQueue()
@@ -102,10 +93,10 @@ export class MatchmakingPlayer {
    * Cancel search, marks ticket as Cancelled (runs in TEE)
    */
   async cancelTicket(
-    tenant: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    tenant: web3.PublicKey,
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
     return await this.program.methods
       .cancelTicket()
@@ -122,10 +113,10 @@ export class MatchmakingPlayer {
    * Close ticket and reclaim rent (L1, after match consumed or cancelled)
    */
   async closeTicket(
-    tenant: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    tenant: web3.PublicKey,
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
     return await this.program.methods
       .closeTicket()
@@ -143,10 +134,10 @@ export class MatchmakingPlayer {
    * Returns match info when ticket status changes to Matched.
    */
   async waitForMatch(
-    ticketPda: PublicKey,
-    connection: Connection,
+    ticketPda: web3.PublicKey,
+    connection: web3.Connection,
     timeoutMs: number = 120000
-  ): Promise<{ opponent: PublicKey; matchId: anchor.BN } | null> {
+  ): Promise<{ opponent: web3.PublicKey; matchId: anchor.BN } | null> {
     return new Promise((resolve, reject) => {
       let subscriptionId: number | null = null;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -167,7 +158,7 @@ export class MatchmakingPlayer {
       // Subscribe to account changes on L1
       subscriptionId = connection.onAccountChange(
         ticketPda,
-        (accountInfo: AccountInfo<Buffer>) => {
+        (accountInfo: web3.AccountInfo<Buffer>) => {
           try {
             const decoded = this.program.coder.accounts.decode(
               "matchTicket",
@@ -193,12 +184,12 @@ export class MatchmakingPlayer {
    * Poll L1 for ticket status (fallback for environments without websocket)
    */
   async pollForMatch(
-    ticketPda: PublicKey,
-    connection: Connection,
+    ticketPda: web3.PublicKey,
+    connection: web3.Connection,
     maxAttempts: number = 60,
     pollInterval: number = 2000,
     signal?: AbortSignal
-  ): Promise<{ opponent: PublicKey; matchId: anchor.BN } | null> {
+  ): Promise<{ opponent: web3.PublicKey; matchId: anchor.BN } | null> {
     for (let i = 0; i < maxAttempts; i++) {
       if (signal?.aborted) return null;
 

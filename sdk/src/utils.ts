@@ -1,26 +1,29 @@
-import { PublicKey } from "@solana/web3.js";
-import { BN } from "@coral-xyz/anchor";
+import * as web3 from "@solana/web3.js";
+import * as anchor from "@coral-xyz/anchor";
 
-export function deriveQueuePda(programId: PublicKey, authority: PublicKey, queueId: string): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("queue-head"), authority.toBuffer(), Buffer.from(queueId)],
+export const QUEUE_SEED = "queue";
+export const TENANT_SEED = "tenant";
+export const TICKET_SEED = "ticket";
+
+export function deriveQueuePda(programId: web3.PublicKey, authority: web3.PublicKey): web3.PublicKey {
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(QUEUE_SEED), authority.toBuffer()],
         programId
     );
     return pda;
 }
 
-export function derivePagePda(programId: PublicKey, queue: PublicKey, index: BN | number): PublicKey {
-    const idxBn = new BN(index);
-    const [pda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("page"), queue.toBuffer(), idxBn.toArrayLike(Buffer, "le", 8)],
+export function deriveTenantPda(programId: web3.PublicKey, authority: web3.PublicKey): web3.PublicKey {
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(TENANT_SEED), authority.toBuffer()],
         programId
     );
     return pda;
 }
 
-export function derivePlayerStatusPda(programId: PublicKey, playerGameAccount: PublicKey): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("status"), playerGameAccount.toBuffer()],
+export function deriveTicketPda(programId: web3.PublicKey, player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
         programId
     );
     return pda;

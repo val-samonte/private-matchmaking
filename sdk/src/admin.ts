@@ -1,19 +1,21 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram, TransactionSignature, ConfirmOptions, Keypair } from "@solana/web3.js";
-import { Duel } from "./types";
-import IDL from "./duel.json";
+import { BN } from "bn.js";
+import * as web3 from "@solana/web3.js";
+import type { Duel } from "./types.ts";
+import { createRequire } from "module";
+const IDL = createRequire(import.meta.url)("./duel.json");
+import * as utils from "./utils.ts";
 
 const TICKET_SEED = "ticket";
 
 export type EloDataType = 'u8' | 'u16' | 'u32' | 'u64';
 
 export interface InitializeTenantOptions {
-  authority?: PublicKey;
+  authority?: web3.PublicKey;
   eloWindow?: number;
   eloOffset?: number;
   eloDataType?: EloDataType;
-  callbackProgramId?: PublicKey | null;
+  callbackProgramId?: web3.PublicKey | null;
   callbackDiscriminator?: number[] | null;
 }
 
@@ -27,54 +29,38 @@ function getEloSize(dataType: EloDataType): number {
 }
 
 export class MatchmakingAdmin {
-  program: Program<Duel>;
-  provider: AnchorProvider;
+  public program: anchor.Program<Duel>;
+  public provider: anchor.AnchorProvider;
 
-  constructor(provider: AnchorProvider, programId?: PublicKey) {
+  constructor(provider: anchor.AnchorProvider, programId: web3.PublicKey | string) {
+    const address = typeof programId === "string" ? programId : programId.toBase58();
+    const idl = { ...IDL, address };
+    this.program = new anchor.Program(idl as any, provider);
     this.provider = provider;
-    const PROGRAM_ID = programId || new PublicKey("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
-
-    // Override address in IDL
-    const modifiedIdl = { ...IDL } as any;
-    modifiedIdl.address = PROGRAM_ID.toBase58();
-
-    this.program = new Program(modifiedIdl, this.provider);
   }
 
   // Derive PDAs Helpers
-  getQueuePda(authority: PublicKey): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("queue"), authority.toBuffer()],
-      this.program.programId
-    );
-    return pda;
+  getQueuePda(authority: web3.PublicKey): web3.PublicKey {
+    return utils.deriveQueuePda(this.program.programId, authority);
   }
 
-  getTenantPda(authority: PublicKey): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("tenant"), authority.toBuffer()],
-      this.program.programId
-    );
-    return pda;
+  getTenantPda(authority: web3.PublicKey): web3.PublicKey {
+    return utils.deriveTenantPda(this.program.programId, authority);
   }
 
-  getTicketPda(player: PublicKey, tenant: PublicKey): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
-      this.program.programId
-    );
-    return pda;
+  getTicketPda(player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
+    return utils.deriveTicketPda(this.program.programId, player, tenant);
   }
 
   /**
    * Initialize a Tenant (with optional callback config)
    */
   async initializeTenant(
-    tenantProgramId: PublicKey,
+    tenantProgramId: web3.PublicKey,
     options?: InitializeTenantOptions,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const {
       authority = tenantProgramId,
       eloWindow = 100,
@@ -92,9 +78,9 @@ export class MatchmakingAdmin {
         tenantProgramId,
         eloOffset,
         eloSize,
-        new anchor.BN(eloWindow),
+        new BN(eloWindow),
         callbackProgramId || null,
-        callbackDiscriminator ? Buffer.from(callbackDiscriminator) : null
+        callbackDiscriminator ? Array.from(Buffer.from(callbackDiscriminator)) : null
       )
       .accountsPartial({
         tenant: tenantPda,
@@ -108,11 +94,11 @@ export class MatchmakingAdmin {
    * Initialize a Queue
    */
   async initializeQueue(
-    authority: PublicKey,
-    tenant: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    authority: web3.PublicKey,
+    tenant: web3.PublicKey,
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const queuePda = this.getQueuePda(authority);
     return await this.program.methods
       .initializeQueue()
@@ -129,11 +115,11 @@ export class MatchmakingAdmin {
    * Delegate Queue to TEE
    */
   async delegateQueue(
-    authority: PublicKey,
-    validator: PublicKey = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"),
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    authority: web3.PublicKey,
+    validator: web3.PublicKey = new web3.PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"),
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
       const queuePda = this.getQueuePda(authority);
       return await this.program.methods
         .delegateQueue({ queue: { authority } } as any)
@@ -151,13 +137,13 @@ export class MatchmakingAdmin {
    * Can be called by any TEE-authenticated wallet (permissionless)
    */
   async flushMatches(
-    queue: PublicKey,
-    tenant: PublicKey,
-    ticketPdas: PublicKey[],
-    callbackProgram?: PublicKey,
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    queue: web3.PublicKey,
+    tenant: web3.PublicKey,
+    ticketPdas: web3.PublicKey[],
+    callbackProgram?: web3.PublicKey,
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     const remainingAccounts = ticketPdas.map(pda => ({
       pubkey: pda,
       isSigner: false,
@@ -188,11 +174,11 @@ export class MatchmakingAdmin {
    * Commit matched tickets back to L1 (runs in TEE)
    */
   async commitTickets(
-    tenant: PublicKey,
-    ticketPdas: PublicKey[],
-    confirmOptions?: ConfirmOptions,
-    signers: Keypair[] = []
-  ): Promise<TransactionSignature> {
+    tenant: web3.PublicKey,
+    ticketPdas: web3.PublicKey[],
+    confirmOptions?: web3.ConfirmOptions,
+    signers: web3.Keypair[] = []
+  ): Promise<web3.TransactionSignature> {
     return await this.program.methods
       .commitTickets()
       .accountsPartial({
