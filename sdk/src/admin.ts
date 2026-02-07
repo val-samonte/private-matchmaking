@@ -1,10 +1,10 @@
 import * as anchor from "@coral-xyz/anchor";
 import { BN } from "bn.js";
 import * as web3 from "@solana/web3.js";
-import type { Duel } from "./types.ts";
+import type { Duel } from "./types.js";
 import { createRequire } from "module";
 const IDL = createRequire(import.meta.url)("./duel.json");
-import * as utils from "./utils.ts";
+import * as utils from "./utils.js";
 
 const TICKET_SEED = "ticket";
 
@@ -50,6 +50,20 @@ export class MatchmakingAdmin {
 
   getTicketPda(player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
     return utils.deriveTicketPda(this.program.programId, player, tenant);
+  }
+
+  /**
+   * Fetch Queue account data
+   */
+  async getQueue(queuePda: web3.PublicKey): Promise<any> {
+    return await this.program.account.queue.fetch(queuePda);
+  }
+
+  /**
+   * Fetch Tenant account data
+   */
+  async getTenant(tenantPda: web3.PublicKey): Promise<any> {
+    return await this.program.account.tenant.fetch(tenantPda);
   }
 
   /**
@@ -127,7 +141,7 @@ export class MatchmakingAdmin {
             pda: queuePda,
             payer: authority,
             validator: validator,
-        } as any)
+        } as unknown as any)
         .signers(signers)
         .rpc(confirmOptions);
   }

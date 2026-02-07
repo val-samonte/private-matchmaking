@@ -1,9 +1,9 @@
 import * as anchor from "@coral-xyz/anchor";
 import * as web3 from "@solana/web3.js";
-import type { Duel } from "./types.ts";
+import type { Duel } from "./types.js";
 import { createRequire } from "module";
 const IDL = createRequire(import.meta.url)("./duel.json");
-import * as utils from "./utils.ts";
+import * as utils from "./utils.js";
 
 export class MatchmakingPlayer {
   public program: anchor.Program<Duel>;
@@ -21,6 +21,13 @@ export class MatchmakingPlayer {
    */
   getTicketPda(player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
     return utils.deriveTicketPda(this.program.programId, player, tenant);
+  }
+
+  /**
+   * Fetch MatchTicket account data
+   */
+  async getTicket(ticketPda: web3.PublicKey): Promise<any> {
+    return await this.program.account.matchTicket.fetch(ticketPda);
   }
 
   /**
