@@ -74,7 +74,7 @@ export function useGameSession() {
 
       if (role === "player1") {
         // PLAYER 1: Create and Delegate
-        const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
+        const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed", skipPreflight: true });
         const program = new Program(IDL as any, provider) as Program<RpsGame>;
         
         // Derive MatchTicket PDA

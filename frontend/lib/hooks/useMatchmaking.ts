@@ -5,9 +5,10 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useAtomValue } from "jotai";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { AnchorProvider, Program } from "@coral-xyz/anchor";
+import { AnchorProvider } from "@coral-xyz/anchor";
+import { MatchmakingPlayer } from "@1upmonster/duel";
 import { getTeeAuthToken, createTeeProvider, waitForDelegation } from "@/lib/utils/tee";
-import { deriveTicketPda, deriveQueuePda, deriveTenantPda } from "@/lib/utils/pda";
+import { deriveQueuePda, deriveTenantPda } from "@/lib/utils/pda";
 import {
   DUEL_PROGRAM_ID,
   QUEUE_AUTHORITY,
@@ -23,6 +24,7 @@ type MatchmakingState = "idle" | "creating_ticket" | "delegating" | "joining" | 
 type MatchResult = {
   opponent: string;
   matchId: string;
+  role: "player1" | "player2";
 };
 
 export function useMatchmaking() {
@@ -49,36 +51,28 @@ export function useMatchmaking() {
       // Derive PDAs
       const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
       const [queuePda] = deriveQueuePda(QUEUE_AUTHORITY);
-      const [ticketPda] = deriveTicketPda(wallet.publicKey, tenantPda);
+
+      const confirmOpts = { commitment: "confirmed" as const, skipPreflight: true };
 
       // 1. Get TEE auth token (player signs directly, no backend)
       setState("creating_ticket");
       console.log("Authenticating with TEE...");
       const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
 
-      // Create L1 connection for ticket creation
+      // Create L1 provider + SDK player
       const l1Connection = new Connection(
         RPC_ENDPOINTS[SOLANA_NETWORK as keyof typeof RPC_ENDPOINTS] || RPC_ENDPOINTS.devnet,
         "confirmed"
       );
-      const l1Provider = new AnchorProvider(l1Connection, wallet as any, { commitment: "confirmed" });
+      const l1Provider = new AnchorProvider(l1Connection, wallet as any, { commitment: "confirmed", skipPreflight: true });
+      const l1Player = new MatchmakingPlayer(l1Provider, DUEL_PROGRAM_ID);
 
-      // Load the duel program IDL dynamically
-      const DuelIDL = (await import("@1upmonster/duel/dist/duel.json")).default;
-      const modifiedIdl = { ...DuelIDL } as any;
-      modifiedIdl.address = DUEL_PROGRAM_ID.toBase58();
+      // Get ticket PDA from SDK
+      const ticketPda = l1Player.getTicketPda(wallet.publicKey, tenantPda);
 
       // 2. Create MatchTicket on L1
       console.log("Creating MatchTicket on L1...");
-      const l1Program = new Program(modifiedIdl, l1Provider);
-      await l1Program.methods
-        .createTicket()
-        .accountsPartial({
-          ticket: ticketPda,
-          tenant: tenantPda,
-          player: wallet.publicKey,
-        })
-        .rpc();
+      await l1Player.createTicket(tenantPda, confirmOpts);
       console.log("Ticket created:", ticketPda.toBase58());
 
       if (signal.aborted) throw new Error("Search cancelled");
@@ -86,14 +80,7 @@ export function useMatchmaking() {
       // 3. Delegate ticket to TEE
       setState("delegating");
       console.log("Delegating ticket to TEE...");
-      await l1Program.methods
-        .delegateTicket({ ticket: { player: wallet.publicKey, tenant: tenantPda } } as any)
-        .accounts({
-          pda: ticketPda,
-          payer: wallet.publicKey,
-          validator: ER_VALIDATOR,
-        } as any)
-        .rpc();
+      await l1Player.delegateTicket(wallet.publicKey, tenantPda, ER_VALIDATOR, confirmOpts);
 
       // Wait for delegation to activate
       console.log("Waiting for ticket TEE activation...");
@@ -105,18 +92,9 @@ export function useMatchmaking() {
       setState("joining");
       console.log("Joining queue via TEE...");
       const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, wallet);
-      const teeProgram = new Program(modifiedIdl, teeProvider);
+      const teePlayer = new MatchmakingPlayer(teeProvider, DUEL_PROGRAM_ID);
 
-      await teeProgram.methods
-        .joinQueue()
-        .accountsPartial({
-          queue: queuePda,
-          tenant: tenantPda,
-          playerData: profilePda,
-          playerTicket: ticketPda,
-          signer: wallet.publicKey,
-        })
-        .rpc();
+      await teePlayer.joinQueue(queuePda, tenantPda, profilePda, confirmOpts);
       console.log("Joined queue via TEE");
 
       if (signal.aborted) throw new Error("Search cancelled");
@@ -153,15 +131,22 @@ export function useMatchmaking() {
           ticketPda,
           (accountInfo) => {
             try {
-              const decoded = l1Program.coder.accounts.decode(
+              const decoded = l1Player.program.coder.accounts.decode(
                 "matchTicket",
                 accountInfo.data
               );
               if (decoded.status?.matched) {
                 cleanup();
+                const opponentKey = decoded.status.matched.opponent;
+                const opponentStr = opponentKey.toBase58();
+                // Determine role: lexicographically smaller pubkey is player1
+                const myKey = wallet.publicKey!.toBuffer();
+                const oppKey = new PublicKey(opponentStr).toBuffer();
+                const role = Buffer.compare(myKey, oppKey) < 0 ? "player1" : "player2";
                 resolve({
-                  opponent: decoded.status.matched.opponent.toBase58(),
+                  opponent: opponentStr,
                   matchId: decoded.status.matched.matchId.toString(),
+                  role,
                 });
               }
             } catch (e) {
@@ -207,7 +192,20 @@ export function useMatchmaking() {
       abortControllerRef.current.abort();
       console.log("Cancelling match search...");
     }
-  }, []);
+
+    // Best-effort on-chain cancel (fire-and-forget)
+    if (wallet.publicKey && wallet.signMessage) {
+      const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
+      getTeeAuthToken(TEE_RPC_URL, wallet)
+        .then(({ token }) => {
+          const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, wallet);
+          const teePlayer = new MatchmakingPlayer(teeProvider, DUEL_PROGRAM_ID);
+          return teePlayer.cancelTicket(tenantPda, { commitment: "confirmed", skipPreflight: true });
+        })
+        .then(() => console.log("Ticket cancelled on-chain"))
+        .catch((err) => console.warn("Failed to cancel ticket on-chain (best-effort):", err));
+    }
+  }, [wallet]);
 
   const reset = useCallback(() => {
     setState("idle");

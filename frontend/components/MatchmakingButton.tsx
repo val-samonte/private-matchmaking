@@ -17,7 +17,7 @@ export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
       try {
         const match = await findMatch();
         if (match) {
-          onMatchFound(new PublicKey(match.opponent), parseInt(match.gameId), match.role);
+          onMatchFound(new PublicKey(match.opponent), parseInt(match.matchId), match.role);
         }
       } catch (err) {
         console.error("Matchmaking error:", err);
@@ -30,8 +30,8 @@ export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
       case "idle":
       case "error":
         return "Find Match";
-      case "authenticating":
-        return "Authenticating...";
+      case "creating_ticket":
+        return "Creating Ticket...";
       case "delegating":
         return "Delegating Profile...";
       case "joining":
@@ -77,7 +77,7 @@ export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
         <div className="glass rounded-xl p-4 text-center">
           <p className="text-success font-semibold mb-2">Match Found!</p>
           <p className="text-sm text-foreground-muted">
-            Opponent: {matchResult.opponent.toBase58().slice(0, 8)}...
+            Opponent: {matchResult.opponent.slice(0, 8)}...
           </p>
         </div>
       )}

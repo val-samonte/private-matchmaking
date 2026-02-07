@@ -44,6 +44,7 @@ export function createTeeProvider(
 
   return new AnchorProvider(connection, wallet as any, {
     commitment: "confirmed",
+    skipPreflight: true,
   });
 }
 
