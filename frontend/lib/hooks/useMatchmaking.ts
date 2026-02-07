@@ -52,19 +52,18 @@ export function useMatchmaking() {
       const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
       const [queuePda] = deriveQueuePda(QUEUE_AUTHORITY);
 
-      const confirmOpts = { commitment: "confirmed" as const, skipPreflight: true };
-
       // 1. Get TEE auth token (player signs directly, no backend)
       setState("creating_ticket");
       console.log("Authenticating with TEE...");
       const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
 
-      // Create L1 provider + SDK player
+      // Create L1 provider + SDK player (no skipPreflight on L1 — Anchor/web3.js
+      // constructor mismatch garbles on-chain errors when preflight is skipped)
       const l1Connection = new Connection(
         RPC_ENDPOINTS[SOLANA_NETWORK as keyof typeof RPC_ENDPOINTS] || RPC_ENDPOINTS.devnet,
         "confirmed"
       );
-      const l1Provider = new AnchorProvider(l1Connection, wallet as any, { commitment: "confirmed", skipPreflight: true });
+      const l1Provider = new AnchorProvider(l1Connection, wallet as any, { commitment: "confirmed" });
       const l1Player = new MatchmakingPlayer(l1Provider, DUEL_PROGRAM_ID);
 
       // Get ticket PDA from SDK
@@ -72,7 +71,7 @@ export function useMatchmaking() {
 
       // 2. Create MatchTicket on L1
       console.log("Creating MatchTicket on L1...");
-      await l1Player.createTicket(tenantPda, confirmOpts);
+      await l1Player.createTicket(tenantPda);
       console.log("Ticket created:", ticketPda.toBase58());
 
       if (signal.aborted) throw new Error("Search cancelled");
@@ -80,7 +79,7 @@ export function useMatchmaking() {
       // 3. Delegate ticket to TEE
       setState("delegating");
       console.log("Delegating ticket to TEE...");
-      await l1Player.delegateTicket(wallet.publicKey, tenantPda, ER_VALIDATOR, confirmOpts);
+      await l1Player.delegateTicket(wallet.publicKey, tenantPda, ER_VALIDATOR);
 
       // Wait for delegation to activate
       console.log("Waiting for ticket TEE activation...");
@@ -94,7 +93,8 @@ export function useMatchmaking() {
       const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, wallet);
       const teePlayer = new MatchmakingPlayer(teeProvider, DUEL_PROGRAM_ID);
 
-      await teePlayer.joinQueue(queuePda, tenantPda, profilePda, confirmOpts);
+      // TEE provider already has skipPreflight: true from createTeeProvider
+      await teePlayer.joinQueue(queuePda, tenantPda, profilePda);
       console.log("Joined queue via TEE");
 
       if (signal.aborted) throw new Error("Search cancelled");
