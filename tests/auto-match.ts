@@ -425,10 +425,11 @@ describe("web3-matchmaking-with-tickets", () => {
       rpsGame.programId
     );
 
-    // Start game (can now optionally verify via ticket)
-    await sendAndConfirmRobust(rpsGame, rpsGame.methods.startGame(gameId, player2.publicKey).accounts({
+    // Start game (use secure verification via ticket)
+    await sendAndConfirmRobust(rpsGame, rpsGame.methods.startGameWithTicket(gameId, player2.publicKey).accounts({
       player: player1.publicKey,
-    }).transaction(), [player1]);
+      matchTicket: p1TicketPda,
+    } as any).transaction(), [player1]);
 
     // Delegate Game Session
     await sendAndConfirmRobust(rpsGame, rpsGame.methods.delegatePda({

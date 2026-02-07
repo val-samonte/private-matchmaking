@@ -7,12 +7,14 @@ import { PublicKey } from "@solana/web3.js";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { getTeeAuthToken, createTeeProvider, waitForDelegation } from "@/lib/utils/tee";
-import { deriveGameSessionPda, derivePlayerProfilePda } from "@/lib/utils/pda";
+import { deriveGameSessionPda, derivePlayerProfilePda, deriveTicketPda, deriveTenantPda } from "@/lib/utils/pda";
 import { 
   RPS_GAME_PROGRAM_ID, 
   TEE_RPC_URL, 
   TEE_WS_URL, 
-  ER_VALIDATOR 
+  ER_VALIDATOR,
+  QUEUE_AUTHORITY,
+  DUEL_PROGRAM_ID 
 } from "@/lib/constants";
 import IDL from "@/lib/types/rps_game.json";
 import type { RpsGame } from "@/lib/types/rps_game_idl";
@@ -75,11 +77,16 @@ export function useGameSession() {
         const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
         const program = new Program(IDL as any, provider) as Program<RpsGame>;
         
-        console.log("P1: Calling startGame instruction...");
+        // Derive MatchTicket PDA
+        const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
+        const [ticketPda] = deriveTicketPda(wallet.publicKey, tenantPda, DUEL_PROGRAM_ID);
+
+        console.log("P1: Calling start_game_with_ticket instruction...");
         await program.methods
-          .startGame(gameIdBN, opponentPubkey)
+          .startGameWithTicket(gameIdBN, opponentPubkey)
           .accounts({
             player: wallet.publicKey,
+            matchTicket: ticketPda,
           } as any)
           .rpc();
         

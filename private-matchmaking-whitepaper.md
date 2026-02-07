@@ -19,19 +19,20 @@ The protocol utilizes a **Hybrid On-Chain/Off-Chain** model:
 ### System Diagram
 ```mermaid
 graph TD
-    User["Player Wallet"] -->|"Join Queue (Encrypted)"| TEE["TEE Matchmaker"]
-    TEE -->|"Read ELO"| UserProfile["Player Profile (L1)"]
-    TEE -->|"Update State"| QueueState["Queue Buffer (Hidden)"]
-    TEE -->|"Emit Event"| Event["MatchFound Event"]
-    Event -->|"Trigger"| Game["Game Session"]
+    User["Player"] -->|"Create Ticket (L1)"| L1["Solana L1"]
+    L1 -->|"Delegate Ticket"| TEE["TEE Matchmaker"]
+    TEE -->|"Read Ticket & Profile"| UserProfile["Player Data"]
+    TEE -->|"Auto-Match"| QueueState["Queue Buffer (Hidden)"]
+    TEE -->|"Update Ticket (Matched)"| L1Ticket["MatchTicket (L1)"]
+    L1Ticket -->|"Start Game"| Game["Game Session"]
 ```
 
 ## 4. Technical Specifications
 
-### 4.1 Queue Structure
-A `Queue` consists of a Ring Buffer of `Pages`.
-- **Scalability**: Paginated storage allows infinite horizonal scaling of the player pool.
-- **Ring Buffer**: Efficient FIFO/O(n) matching loops without reallocation.
+### 4.1 Queue Structure (TEE)
+A `Queue` is an efficient, in-memory data structure residing entirely within the TEE.
+- **Privacy**: The queue state is invisible to L1 observers.
+- **Speed**: Matching happens in-memory without L1 latency.
 - **Tenant Isolation**: Each Game Program (Tenant) owns its own Queues.
 
 ### 4.2 Universal Adapter (CPI)
@@ -48,10 +49,12 @@ The protocol implements the `DelegateQueue` instruction which leverages the `eph
 
 ## 5. Integration Flow
 1.  **Initialize**: Game Dev calls `initialize_queue` -> `delegate_queue`.
-2.  **Join**: Player calls `join_queue`. If delegated, this tx is routed to the TEE.
-3.  **Process**: A "Crank" (or auto-clock in TEE) runs `process_match`.
-4.  **Handoff**: `MatchFound` event contains `[PlayerA, PlayerB, QueueID]`.
-5.  **Game Start**: Clients listen for this event and trigger the Game Session.
+2.  **Create Ticket**: Player calls `create_ticket` on L1.
+3.  **Delegate**: Player calls `delegate_ticket` to authorize TEE access.
+4.  **Join Queue**: Player calls `join_queue` via the TEE (encrypted).
+5.  **Auto-Match**: The TEE runs matching logic and updates local ticket state.
+6.  **Commit**: The TEE commits the "Matched" status back to the L1 `MatchTicket`.
+7.  **Game Start**: Player calls `start_game_with_ticket`, proving the match to the game program.
 
 ## 6. Security Model
 - **Privacy**: Observers see "Interaction with Matchmaker" but not *who* is in the queue or their ELO, as the Queue memory is inside the enclave.

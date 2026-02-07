@@ -418,6 +418,43 @@
       ]
     },
     {
+      "name": "on_match_found",
+      "docs": [
+        "Callback handler invoked by the duel program after a match is committed.",
+        "Demonstrates the CPI callback pattern for permissionless integration."
+      ],
+      "discriminator": [
+        66,
+        209,
+        170,
+        159,
+        10,
+        195,
+        34,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "player1",
+          "type": "pubkey"
+        },
+        {
+          "name": "player2",
+          "type": "pubkey"
+        },
+        {
+          "name": "match_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "persist_results",
       "discriminator": [
         9,
@@ -569,6 +606,86 @@
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "start_game_with_ticket",
+      "docs": [
+        "Start game with MatchTicket verification - proves the match was legitimately found"
+      ],
+      "discriminator": [
+        2,
+        250,
+        253,
+        202,
+        51,
+        138,
+        80,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "game_session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  118,
+                  49
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "arg",
+                "path": "opponent"
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "match_ticket"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "opponent",
+          "type": "pubkey"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -609,6 +726,11 @@
       "code": 6001,
       "name": "InvalidPlayer",
       "msg": "Invalid player"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidMatchTicket",
+      "msg": "Invalid match ticket - not matched or wrong opponent"
     }
   ],
   "types": [
