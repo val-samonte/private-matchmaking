@@ -7,6 +7,7 @@ import {
   GAME_SESSION_SEED,
   QUEUE_SEED,
   TENANT_SEED,
+  TICKET_SEED,
 } from "../constants";
 
 /**
@@ -64,6 +65,20 @@ export function deriveTenantPda(
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(TENANT_SEED), authority.toBuffer()],
+    programId
+  );
+}
+
+/**
+ * Derive MatchTicket PDA
+ */
+export function deriveTicketPda(
+  player: PublicKey,
+  tenant: PublicKey,
+  programId: PublicKey = DUEL_PROGRAM_ID
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
     programId
   );
 }

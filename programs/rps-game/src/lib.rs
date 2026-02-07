@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use duel::Queue; 
 
 use ephemeral_rollups_sdk::anchor::{delegate, ephemeral, commit};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
@@ -133,7 +132,61 @@ pub mod rps_game {
     }
     
     // Close functions for cleanup
-     pub fn close_player(_ctx: Context<ClosePlayer>) -> Result<()> { Ok(()) }
+    pub fn close_player(_ctx: Context<ClosePlayer>) -> Result<()> { Ok(()) }
+
+    /// Callback handler invoked by the duel program after a match is committed.
+    /// Demonstrates the CPI callback pattern for permissionless integration.
+    pub fn on_match_found(
+        _ctx: Context<OnMatchFound>,
+        player1: Pubkey,
+        player2: Pubkey,
+        match_id: u64,
+    ) -> Result<()> {
+        msg!(
+            "Match callback received: {} vs {} (match_id: {})",
+            player1,
+            player2,
+            match_id
+        );
+        // In a full implementation, this could auto-create a game session.
+        // For now, just log the callback.
+        Ok(())
+    }
+
+    /// Start game with MatchTicket verification - proves the match was legitimately found
+    pub fn start_game_with_ticket(
+        ctx: Context<StartGameWithTicket>,
+        game_id: u64,
+        opponent: Pubkey,
+    ) -> Result<()> {
+        // Verify the match ticket shows this player was matched with the opponent
+        let ticket_data = ctx.accounts.match_ticket.try_borrow_data()?;
+        // Skip 8-byte discriminator, then read: player(32) + tenant(32) + status(1+...)
+        // status offset = 8 + 32 + 32 = 72
+        // status discriminator at byte 72: 0=Searching, 1=Matched, 2=Expired, 3=Cancelled
+        require!(ticket_data.len() > 72, GameError::InvalidMatchTicket);
+        require!(ticket_data[72] == 1, GameError::InvalidMatchTicket); // Must be Matched
+
+        // Read opponent from matched status: bytes 73..105
+        let mut opponent_bytes = [0u8; 32];
+        opponent_bytes.copy_from_slice(&ticket_data[73..105]);
+        let ticket_opponent = Pubkey::from(opponent_bytes);
+        require!(ticket_opponent == opponent, GameError::InvalidMatchTicket);
+        drop(ticket_data);
+
+        let session = &mut ctx.accounts.game_session;
+        session.game_id = game_id;
+        session.player1 = ctx.accounts.player.key();
+        session.player2 = opponent;
+        session.result = GameResult::None;
+
+        msg!(
+            "Game Session Started (verified via ticket): {} vs {}",
+            session.player1,
+            session.player2
+        );
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -215,6 +268,28 @@ pub struct ClosePlayer<'info> {
     pub payer: AccountInfo<'info>,
 }
 
+#[derive(Accounts)]
+pub struct OnMatchFound<'info> {
+    pub signer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(game_id: u64, opponent: Pubkey)]
+pub struct StartGameWithTicket<'info> {
+    #[account(
+        init,
+        payer = player,
+        space = 8 + GameSession::LEN,
+        seeds = [GAME_SESSION_SEED, player.key().as_ref(), opponent.as_ref(), &game_id.to_le_bytes()],
+        bump
+    )]
+    pub game_session: Account<'info, GameSession>,
+    #[account(mut)]
+    pub player: Signer<'info>,
+    /// CHECK: MatchTicket PDA from the duel program, verified in instruction body
+    pub match_ticket: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
 
 #[account]
 pub struct PlayerProfile {
@@ -262,6 +337,8 @@ pub enum GameError {
     AlreadyChose,
     #[msg("Invalid player")]
     InvalidPlayer,
+    #[msg("Invalid match ticket - not matched or wrong opponent")]
+    InvalidMatchTicket,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

@@ -1,16 +1,20 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program, Idl, AnchorProvider } from "@coral-xyz/anchor";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram, TransactionSignature, ConfirmOptions, Keypair } from "@solana/web3.js";
 import { Duel } from "./types";
 import IDL from "./duel.json";
 
+const TICKET_SEED = "ticket";
+
 export type EloDataType = 'u8' | 'u16' | 'u32' | 'u64';
 
 export interface InitializeTenantOptions {
-  authority?: PublicKey;     // Optional, defaults to tenantProgramId
-  eloWindow?: number;        // Default: 100
-  eloOffset?: number;        // Default: 40
-  eloDataType?: EloDataType; // Default: 'u16'
+  authority?: PublicKey;
+  eloWindow?: number;
+  eloOffset?: number;
+  eloDataType?: EloDataType;
+  callbackProgramId?: PublicKey | null;
+  callbackDiscriminator?: number[] | null;
 }
 
 function getEloSize(dataType: EloDataType): number {
@@ -29,11 +33,11 @@ export class MatchmakingAdmin {
   constructor(provider: AnchorProvider, programId?: PublicKey) {
     this.provider = provider;
     const PROGRAM_ID = programId || new PublicKey("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
-    
+
     // Override address in IDL
     const modifiedIdl = { ...IDL } as any;
     modifiedIdl.address = PROGRAM_ID.toBase58();
-    
+
     this.program = new Program(modifiedIdl, this.provider);
   }
 
@@ -54,8 +58,16 @@ export class MatchmakingAdmin {
     return pda;
   }
 
+  getTicketPda(player: PublicKey, tenant: PublicKey): PublicKey {
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
+      this.program.programId
+    );
+    return pda;
+  }
+
   /**
-   * Initialize a Tenant
+   * Initialize a Tenant (with optional callback config)
    */
   async initializeTenant(
     tenantProgramId: PublicKey,
@@ -67,18 +79,22 @@ export class MatchmakingAdmin {
       authority = tenantProgramId,
       eloWindow = 100,
       eloOffset = 40,
-      eloDataType = 'u16'
+      eloDataType = 'u16',
+      callbackProgramId = null,
+      callbackDiscriminator = null,
     } = options || {};
-    
+
     const eloSize = getEloSize(eloDataType);
     const tenantPda = this.getTenantPda(authority);
-    
+
     return await this.program.methods
       .initializeTenant(
         tenantProgramId,
         eloOffset,
         eloSize,
-        new anchor.BN(eloWindow)
+        new anchor.BN(eloWindow),
+        callbackProgramId || null,
+        callbackDiscriminator ? Buffer.from(callbackDiscriminator) : null
       )
       .accountsPartial({
         tenant: tenantPda,
@@ -129,5 +145,68 @@ export class MatchmakingAdmin {
         .signers(signers)
         .rpc(confirmOptions);
   }
-}
 
+  /**
+   * Flush pending matches - crank instruction to update opponent tickets
+   * Can be called by any TEE-authenticated wallet (permissionless)
+   */
+  async flushMatches(
+    queue: PublicKey,
+    tenant: PublicKey,
+    ticketPdas: PublicKey[],
+    callbackProgram?: PublicKey,
+    confirmOptions?: ConfirmOptions,
+    signers: Keypair[] = []
+  ): Promise<TransactionSignature> {
+    const remainingAccounts = ticketPdas.map(pda => ({
+      pubkey: pda,
+      isSigner: false,
+      isWritable: true,
+    }));
+
+    if (callbackProgram) {
+      remainingAccounts.push({
+        pubkey: callbackProgram,
+        isSigner: false,
+        isWritable: false,
+      });
+    }
+
+    return await this.program.methods
+      .flushMatches()
+      .accountsPartial({
+        queue: queue,
+        tenant: tenant,
+        signer: this.provider.publicKey,
+      })
+      .remainingAccounts(remainingAccounts)
+      .signers(signers)
+      .rpc(confirmOptions);
+  }
+
+  /**
+   * Commit matched tickets back to L1 (runs in TEE)
+   */
+  async commitTickets(
+    tenant: PublicKey,
+    ticketPdas: PublicKey[],
+    confirmOptions?: ConfirmOptions,
+    signers: Keypair[] = []
+  ): Promise<TransactionSignature> {
+    return await this.program.methods
+      .commitTickets()
+      .accountsPartial({
+        tenant: tenant,
+        payer: this.provider.publicKey,
+      })
+      .remainingAccounts(
+        ticketPdas.map(pda => ({
+          pubkey: pda,
+          isSigner: false,
+          isWritable: true,
+        }))
+      )
+      .signers(signers)
+      .rpc(confirmOptions);
+  }
+}

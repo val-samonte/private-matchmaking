@@ -18,6 +18,7 @@ export const PLAYER_PROFILE_SEED = "player_profile_v35";
 export const GAME_SESSION_SEED = "game_session_v1";
 export const QUEUE_SEED = "queue";
 export const TENANT_SEED = "tenant";
+export const TICKET_SEED = "ticket";
 
 // TEE Configuration
 export const TEE_RPC_URL = process.env.NEXT_PUBLIC_TEE_RPC_URL || "https://tee.magicblock.app";

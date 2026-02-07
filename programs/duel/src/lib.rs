@@ -1,8 +1,13 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::anchor::{delegate, ephemeral};
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+use anchor_lang::solana_program::program::invoke;
+use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::ephem::commit_accounts;
 
 declare_id!("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
+
+pub const TICKET_SEED: &[u8] = b"ticket";
 
 #[ephemeral]
 #[program]
@@ -15,6 +20,8 @@ pub mod duel {
         elo_offset: u32,
         elo_size: u8,
         elo_window: u64,
+        callback_program_id: Option<Pubkey>,
+        callback_discriminator: Option<[u8; 8]>,
     ) -> Result<()> {
         let tenant = &mut ctx.accounts.tenant;
         tenant.authority = ctx.accounts.authority.key();
@@ -22,6 +29,8 @@ pub mod duel {
         tenant.elo_offset = elo_offset;
         tenant.elo_size = elo_size;
         tenant.elo_window = elo_window;
+        tenant.callback_program_id = callback_program_id;
+        tenant.callback_discriminator = callback_discriminator;
         msg!(
             "Tenant Initialized for Program: {} (ELO size: {} bytes)",
             tenant_program_id,
@@ -35,6 +44,7 @@ pub mod duel {
         queue.authority = ctx.accounts.authority.key();
         queue.tenant = ctx.accounts.tenant.key();
         queue.bump = ctx.bumps.queue;
+        queue.match_counter = 0;
         msg!("Queue Initialized linked to Tenant: {}", queue.tenant);
         Ok(())
     }
@@ -55,15 +65,79 @@ pub mod duel {
         Ok(())
     }
 
+    /// Player creates a MatchTicket PDA on L1
+    pub fn create_ticket(ctx: Context<CreateTicket>) -> Result<()> {
+        let ticket = &mut ctx.accounts.ticket;
+        ticket.player = ctx.accounts.player.key();
+        ticket.tenant = ctx.accounts.tenant.key();
+        ticket.status = TicketStatus::Searching;
+        ticket.created_at = Clock::get()?.unix_timestamp;
+        ticket.bump = ctx.bumps.ticket;
+        msg!(
+            "Ticket created for player {} (tenant {})",
+            ticket.player,
+            ticket.tenant
+        );
+        Ok(())
+    }
+
+    /// Player delegates their ticket into TEE (becomes invisible on L1)
+    pub fn delegate_ticket(ctx: Context<DelegateTicket>, account_type: AccountType) -> Result<()> {
+        let seed_data = derive_seeds_from_account_type(&account_type);
+        let seeds_refs: Vec<&[u8]> = seed_data.iter().map(|s| s.as_slice()).collect();
+        let validator = ctx.accounts.validator.as_ref().map(|v| v.key());
+
+        ctx.accounts.delegate_pda(
+            &ctx.accounts.payer,
+            &seeds_refs,
+            DelegateConfig {
+                validator,
+                ..Default::default()
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Player cancels search, marks ticket as Cancelled (runs in TEE)
+    pub fn cancel_ticket(ctx: Context<CancelTicket>) -> Result<()> {
+        let ticket = &mut ctx.accounts.ticket;
+        require!(
+            matches!(ticket.status, TicketStatus::Searching),
+            MatchmakingError::InvalidTicketStatus
+        );
+        require!(
+            ticket.player == ctx.accounts.player.key(),
+            MatchmakingError::Unauthorized
+        );
+        ticket.status = TicketStatus::Cancelled;
+        msg!("Ticket cancelled for player {}", ticket.player);
+        Ok(())
+    }
+
+    /// Reclaim rent after match consumed or cancelled (L1)
+    pub fn close_ticket(_ctx: Context<CloseTicket>) -> Result<()> {
+        // Account is closed via the `close` constraint
+        msg!("Ticket closed and rent reclaimed");
+        Ok(())
+    }
+
+    /// Modified join_queue: now requires player's MatchTicket
     pub fn join_queue(ctx: Context<JoinQueue>) -> Result<()> {
-        // 1. Verify Tenant
+        // 1. Verify ticket
+        let ticket = &ctx.accounts.player_ticket;
+        require!(
+            matches!(ticket.status, TicketStatus::Searching),
+            MatchmakingError::InvalidTicketStatus
+        );
+        require!(
+            ticket.player == ctx.accounts.signer.key(),
+            MatchmakingError::Unauthorized
+        );
+
+        // 2. Verify Tenant
         let player_account_info = &ctx.accounts.player_data;
         let owner = player_account_info.owner;
         let tenant_program_id = &ctx.accounts.tenant.tenant_program_id;
-
-        // This PID is the MagicBlock Delegation Program ID on Devnet usually
-        // But better to not hardcode.
-        // For now, we allow if owner == tenant OR owner != system_program (weak check).
 
         if owner != tenant_program_id {
             msg!(
@@ -71,11 +145,10 @@ pub mod duel {
                 owner,
                 tenant_program_id
             );
-            // Verify it is NOT the System Program (000...)
             require!(owner != &System::id(), MatchmakingError::InvalidTenant);
         }
 
-        // 2. Read ELO (Generic - supports u8, u16, u32, u64)
+        // 3. Read ELO (Generic - supports u8, u16, u32, u64)
         let data = player_account_info.try_borrow_data()?;
         let offset = ctx.accounts.tenant.elo_offset as usize;
         let elo_size = ctx.accounts.tenant.elo_size as usize;
@@ -104,11 +177,14 @@ pub mod duel {
             _ => return err!(MatchmakingError::InvalidEloSize),
         };
 
+        // Need to drop borrow before mutable access
+        drop(data);
+
         msg!("Player joined with ELO: {} ({} bytes)", elo, elo_size);
 
-        // 3. Insert into Queue
+        // 4. Insert into Queue
         let entry = QueueEntry {
-            player: ctx.accounts.player_data.key(), // Use the account key as player ID
+            player: ctx.accounts.signer.key(),
             elo,
         };
         ctx.accounts.queue.entries.push(entry);
@@ -119,7 +195,7 @@ pub mod duel {
             ctx.accounts.queue.entries.len()
         );
 
-        // 4. Automatically process matches after adding player
+        // 5. Automatically process matches after adding player
         let queue = &mut ctx.accounts.queue;
         let window = ctx.accounts.tenant.elo_window;
 
@@ -127,7 +203,6 @@ pub mod duel {
             let new_player_idx = queue.entries.len() - 1;
             let new_player = queue.entries[new_player_idx];
 
-            // Try to find a match for the newly added player
             for i in 0..new_player_idx {
                 let other_player = queue.entries[i];
                 let diff = if new_player.elo > other_player.elo {
@@ -139,19 +214,23 @@ pub mod duel {
                 if diff <= window {
                     // Match found!
                     let timestamp = Clock::get()?.unix_timestamp;
+                    queue.match_counter += 1;
+                    let match_id = queue.match_counter;
 
                     msg!(
-                        "Auto-Match Found: {} (ELO {}) vs {} (ELO {})",
+                        "Auto-Match Found: {} (ELO {}) vs {} (ELO {}), match_id: {}",
                         new_player.player,
                         new_player.elo,
                         other_player.player,
-                        other_player.elo
+                        other_player.elo,
+                        match_id
                     );
 
                     // Emit event
                     emit!(MatchFound {
                         player1: new_player.player,
                         player2: other_player.player,
+                        match_id,
                         timestamp,
                     });
 
@@ -159,15 +238,27 @@ pub mod duel {
                     let match_entry = MatchEntry {
                         player1: new_player.player,
                         player2: other_player.player,
+                        match_id,
                         timestamp,
                     };
-
                     queue.matches.push(match_entry);
-
-                    // Keep only last 10 matches
                     if queue.matches.len() > 10 {
                         queue.matches.remove(0);
                     }
+
+                    // Update the joining player's ticket (we have it as an account)
+                    let player_ticket = &mut ctx.accounts.player_ticket;
+                    player_ticket.status = TicketStatus::Matched {
+                        opponent: other_player.player,
+                        match_id,
+                    };
+
+                    // Store a PendingMatch for the opponent (their ticket isn't available here)
+                    queue.pending_matches.push(PendingMatch {
+                        player: other_player.player,
+                        opponent: new_player.player,
+                        match_id,
+                    });
 
                     // Remove both players from queue (remove higher index first)
                     queue.entries.remove(new_player_idx);
@@ -179,7 +270,175 @@ pub mod duel {
 
         Ok(())
     }
+
+    /// Flush pending matches: update opponent tickets and commit to L1
+    /// Can be called by any TEE-authenticated wallet (permissionless crank)
+    pub fn flush_matches<'a>(ctx: Context<'_, '_, 'a, 'a, FlushMatches<'a>>) -> Result<()> {
+        let queue = &mut ctx.accounts.queue;
+        let pending = std::mem::take(&mut queue.pending_matches);
+
+        if pending.is_empty() {
+            msg!("No pending matches to flush");
+            return Ok(());
+        }
+
+        // Process each pending match against remaining accounts
+        let remaining = &ctx.remaining_accounts;
+        let has_callback = ctx.accounts.tenant.callback_program_id.is_some();
+        // If callback is configured, the last remaining account is the callback program
+        let ticket_account_limit = if has_callback && !remaining.is_empty() {
+            remaining.len() - 1
+        } else {
+            remaining.len()
+        };
+        let mut remaining_idx = 0;
+
+        for pm in &pending {
+            if remaining_idx >= ticket_account_limit {
+                // Put unprocessed matches back
+                queue.pending_matches.extend_from_slice(&pending[remaining_idx..]);
+                msg!(
+                    "Warning: Not enough remaining accounts. {} matches unprocessed.",
+                    pending.len() - remaining_idx
+                );
+                break;
+            }
+
+            let ticket_info = &remaining[remaining_idx];
+            remaining_idx += 1;
+
+            // Verify this is the correct ticket PDA
+            let (expected_pda, _bump) = Pubkey::find_program_address(
+                &[
+                    TICKET_SEED,
+                    pm.player.as_ref(),
+                    ctx.accounts.tenant.key().as_ref(),
+                ],
+                ctx.program_id,
+            );
+            require!(
+                ticket_info.key() == expected_pda,
+                MatchmakingError::InvalidTicketAccount
+            );
+
+            // Deserialize, update, and re-serialize the ticket
+            let mut ticket_data = ticket_info.try_borrow_mut_data()?;
+            // Skip 8-byte discriminator, use deserialize (cursor-based) to handle trailing bytes
+            let mut reader: &[u8] = &ticket_data[8..];
+            let mut ticket = MatchTicket::deserialize(&mut reader)
+                .map_err(|_| error!(MatchmakingError::InvalidTicketAccount))?;
+
+            require!(
+                matches!(ticket.status, TicketStatus::Searching),
+                MatchmakingError::InvalidTicketStatus
+            );
+
+            ticket.status = TicketStatus::Matched {
+                opponent: pm.opponent,
+                match_id: pm.match_id,
+            };
+
+            // Re-serialize back into the account data
+            let serialized = ticket
+                .try_to_vec()
+                .map_err(|_| MatchmakingError::InvalidTicketAccount)?;
+            ticket_data[8..8 + serialized.len()].copy_from_slice(&serialized);
+
+            msg!(
+                "Flushed match: {} matched with {} (id: {})",
+                pm.player,
+                pm.opponent,
+                pm.match_id
+            );
+        }
+
+        // CPI callback if configured on the tenant
+        if let (Some(callback_pid), Some(callback_disc)) = (
+            ctx.accounts.tenant.callback_program_id,
+            ctx.accounts.tenant.callback_discriminator,
+        ) {
+            // The callback program AccountInfo must be the last remaining account
+            require!(
+                remaining.len() > remaining_idx,
+                MatchmakingError::MissingCallbackProgram
+            );
+            let callback_program_info = &remaining[remaining.len() - 1];
+            require!(
+                callback_program_info.key() == callback_pid,
+                MatchmakingError::MissingCallbackProgram
+            );
+            require!(
+                callback_program_info.executable,
+                MatchmakingError::MissingCallbackProgram
+            );
+
+            for pm in &pending[..remaining_idx] {
+                // data = discriminator(8) ++ player(32) ++ opponent(32) ++ match_id(8)
+                let mut data = Vec::with_capacity(80);
+                data.extend_from_slice(&callback_disc);
+                data.extend_from_slice(pm.player.as_ref());
+                data.extend_from_slice(pm.opponent.as_ref());
+                data.extend_from_slice(&pm.match_id.to_le_bytes());
+
+                let ix = Instruction {
+                    program_id: callback_pid,
+                    accounts: vec![AccountMeta {
+                        pubkey: ctx.accounts.signer.key(),
+                        is_signer: true,
+                        is_writable: false,
+                    }],
+                    data,
+                };
+
+                invoke(
+                    &ix,
+                    &[ctx.accounts.signer.to_account_info(), callback_program_info.clone()],
+                )?;
+
+                msg!(
+                    "Callback invoked for match: {} vs {} (id: {})",
+                    pm.player,
+                    pm.opponent,
+                    pm.match_id
+                );
+            }
+        }
+
+        msg!("Flush complete: {} matches processed", remaining_idx);
+        Ok(())
+    }
+
+    /// Commit matched tickets back to L1 (runs in TEE, uses #[commit])
+    pub fn commit_tickets<'a>(ctx: Context<'_, '_, 'a, 'a, CommitTickets<'a>>) -> Result<()> {
+        // Verify all remaining accounts are owned by this program
+        for ticket_info in ctx.remaining_accounts.iter() {
+            require!(
+                ticket_info.owner == ctx.program_id,
+                MatchmakingError::InvalidTicketAccount
+            );
+        }
+
+        if ctx.remaining_accounts.is_empty() {
+            msg!("No tickets to commit");
+            return Ok(());
+        }
+
+        let account_refs: Vec<&AccountInfo> = ctx.remaining_accounts.iter().collect();
+        let count = account_refs.len();
+
+        commit_accounts(
+            &ctx.accounts.payer,
+            account_refs,
+            &ctx.accounts.magic_context.to_account_info(),
+            &ctx.accounts.magic_program.to_account_info(),
+        )?;
+
+        msg!("Committed {} tickets to L1", count);
+        Ok(())
+    }
 }
+
+// --- Account Contexts ---
 
 #[derive(Accounts)]
 pub struct InitializeTenant<'info> {
@@ -202,7 +461,7 @@ pub struct InitializeQueue<'info> {
         init,
         payer = authority,
         space = 8 + Queue::LEN,
-        seeds = [b"queue", authority.key().as_ref()], 
+        seeds = [b"queue", authority.key().as_ref()],
         bump
     )]
     pub queue: Account<'info, Queue>,
@@ -228,6 +487,61 @@ pub struct DelegateQueue<'info> {
 }
 
 #[derive(Accounts)]
+pub struct CreateTicket<'info> {
+    #[account(
+        init,
+        payer = player,
+        space = 8 + MatchTicket::LEN,
+        seeds = [TICKET_SEED, player.key().as_ref(), tenant.key().as_ref()],
+        bump
+    )]
+    pub ticket: Account<'info, MatchTicket>,
+    pub tenant: Account<'info, Tenant>,
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[delegate]
+#[derive(Accounts)]
+pub struct DelegateTicket<'info> {
+    /// CHECK: The ticket PDA to delegate
+    #[account(mut, del)]
+    pub pda: AccountInfo<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: Validator
+    pub validator: Option<AccountInfo<'info>>,
+}
+
+#[derive(Accounts)]
+pub struct CancelTicket<'info> {
+    #[account(
+        mut,
+        seeds = [TICKET_SEED, player.key().as_ref(), tenant.key().as_ref()],
+        bump = ticket.bump,
+    )]
+    pub ticket: Account<'info, MatchTicket>,
+    pub tenant: Account<'info, Tenant>,
+    pub player: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseTicket<'info> {
+    #[account(
+        mut,
+        close = player,
+        seeds = [TICKET_SEED, player.key().as_ref(), tenant.key().as_ref()],
+        bump = ticket.bump,
+        constraint = matches!(ticket.status, TicketStatus::Matched { .. } | TicketStatus::Cancelled | TicketStatus::Expired) @ MatchmakingError::InvalidTicketStatus,
+    )]
+    pub ticket: Account<'info, MatchTicket>,
+    pub tenant: Account<'info, Tenant>,
+    #[account(mut)]
+    pub player: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct JoinQueue<'info> {
     #[account(mut)]
     pub queue: Account<'info, Queue>,
@@ -238,13 +552,62 @@ pub struct JoinQueue<'info> {
     /// CHECK: We inspect the owner and data manually.
     #[account(mut)]
     pub player_data: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [TICKET_SEED, signer.key().as_ref(), tenant.key().as_ref()],
+        bump = player_ticket.bump,
+    )]
+    pub player_ticket: Account<'info, MatchTicket>,
     pub signer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct FlushMatches<'info> {
+    #[account(mut)]
+    pub queue: Account<'info, Queue>,
+    pub tenant: Account<'info, Tenant>,
+    pub signer: Signer<'info>,
+    // remaining_accounts: opponent ticket PDAs to update
+}
+
+#[commit]
+#[derive(Accounts)]
+pub struct CommitTickets<'info> {
+    pub tenant: Account<'info, Tenant>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    // remaining_accounts: ticket PDAs to commit
+}
+
+// --- Account Types ---
+
+#[account]
+pub struct MatchTicket {
+    pub player: Pubkey,     // 32
+    pub tenant: Pubkey,     // 32
+    pub status: TicketStatus, // 1 + 32 + 8 = 41 max
+    pub created_at: i64,    // 8
+    pub bump: u8,           // 1
+}
+
+impl MatchTicket {
+    // discriminator(1) + opponent(32) + match_id(8) = 41 for status
+    pub const LEN: usize = 32 + 32 + 41 + 8 + 1;
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq)]
+pub enum TicketStatus {
+    Searching,
+    Matched { opponent: Pubkey, match_id: u64 },
+    Expired,
+    Cancelled,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
 pub struct MatchEntry {
     pub player1: Pubkey,
     pub player2: Pubkey,
+    pub match_id: u64,
     pub timestamp: i64,
 }
 
@@ -252,7 +615,15 @@ pub struct MatchEntry {
 pub struct MatchFound {
     pub player1: Pubkey,
     pub player2: Pubkey,
+    pub match_id: u64,
     pub timestamp: i64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
+pub struct PendingMatch {
+    pub player: Pubkey,   // The opponent whose ticket needs updating
+    pub opponent: Pubkey, // Who they matched with
+    pub match_id: u64,
 }
 
 #[account]
@@ -260,8 +631,16 @@ pub struct Queue {
     pub authority: Pubkey,
     pub tenant: Pubkey,
     pub bump: u8,
+    pub match_counter: u64,
     pub entries: Vec<QueueEntry>,
-    pub matches: Vec<MatchEntry>, // Store recent matches for visibility
+    pub matches: Vec<MatchEntry>,
+    pub pending_matches: Vec<PendingMatch>,
+}
+
+impl Queue {
+    // Increased size to hold pending_matches
+    // 32 + 32 + 1 + 8 + 4 + (100 * 40) + 4 + (10 * 80) + 4 + (20 * 72)
+    pub const LEN: usize = 32 + 32 + 1 + 8 + 4 + (100 * 40) + 4 + (10 * 80) + 4 + (20 * 72);
 }
 
 #[account]
@@ -271,28 +650,19 @@ pub struct Tenant {
     pub elo_offset: u32,
     pub elo_size: u8,
     pub elo_window: u64,
+    pub callback_program_id: Option<Pubkey>,
+    pub callback_discriminator: Option<[u8; 8]>,
 }
 
 impl Tenant {
-    pub const LEN: usize = 32 + 32 + 4 + 1 + 8;
-}
-
-impl Queue {
-    // Increased size to hold matches
-    pub const LEN: usize = 32 + 32 + 4 + 1 + 64 + (100 * 40) + (10 * 72);
+    // 32 + 32 + 4 + 1 + 8 + 1+32 + 1+8 = 119
+    pub const LEN: usize = 32 + 32 + 4 + 1 + 8 + (1 + 32) + (1 + 8);
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
 pub struct QueueEntry {
     pub player: Pubkey,
     pub elo: u64,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
-pub struct QueueConfig {
-    pub tenant_program_id: Pubkey,
-    pub elo_offset: u32,
-    pub elo_window: u64,
 }
 
 #[error_code]
@@ -305,11 +675,18 @@ pub enum MatchmakingError {
     Unauthorized,
     #[msg("Invalid ELO size (must be 1, 2, 4, or 8 bytes)")]
     InvalidEloSize,
+    #[msg("Invalid ticket status for this operation")]
+    InvalidTicketStatus,
+    #[msg("Invalid ticket account")]
+    InvalidTicketAccount,
+    #[msg("Missing or invalid callback program in remaining accounts")]
+    MissingCallbackProgram,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub enum AccountType {
     Queue { authority: Pubkey },
+    Ticket { player: Pubkey, tenant: Pubkey },
 }
 
 fn derive_seeds_from_account_type(account_type: &AccountType) -> Vec<Vec<u8>> {
@@ -317,5 +694,13 @@ fn derive_seeds_from_account_type(account_type: &AccountType) -> Vec<Vec<u8>> {
         AccountType::Queue { authority } => {
             vec![b"queue".to_vec(), authority.to_bytes().to_vec()]
         }
+        AccountType::Ticket { player, tenant } => {
+            vec![
+                TICKET_SEED.to_vec(),
+                player.to_bytes().to_vec(),
+                tenant.to_bytes().to_vec(),
+            ]
+        }
     }
 }
+

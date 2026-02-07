@@ -13,419 +13,172 @@ export type Duel = {
   },
   "instructions": [
     {
-      "name": "delegateQueue",
-      "discriminator": [
-        31,
-        200,
-        139,
-        125,
-        93,
-        239,
-        83,
-        87
-      ],
+      "name": "cancelTicket",
+      "discriminator": number[],
       "accounts": [
-        {
-          "name": "bufferPda",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  98,
-                  117,
-                  102,
-                  102,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "pda"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                202,
-                134,
-                36,
-                108,
-                174,
-                148,
-                252,
-                73,
-                211,
-                125,
-                15,
-                66,
-                178,
-                45,
-                134,
-                44,
-                37,
-                1,
-                240,
-                164,
-                105,
-                155,
-                163,
-                192,
-                243,
-                31,
-                80,
-                29,
-                128,
-                104,
-                246,
-                134
-              ]
-            }
-          }
-        },
-        {
-          "name": "delegationRecordPda",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "pda"
-              }
-            ],
-            "program": {
-              "kind": "account",
-              "path": "delegationProgram"
-            }
-          }
-        },
-        {
-          "name": "delegationMetadataPda",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110,
-                  45,
-                  109,
-                  101,
-                  116,
-                  97,
-                  100,
-                  97,
-                  116,
-                  97
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "pda"
-              }
-            ],
-            "program": {
-              "kind": "account",
-              "path": "delegationProgram"
-            }
-          }
-        },
-        {
-          "name": "pda",
-          "writable": true
-        },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "validator",
-          "optional": true
-        },
-        {
-          "name": "ownerProgram",
-          "address": "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X"
-        },
-        {
-          "name": "delegationProgram",
-          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
-        }
+        { "name": "ticket", "writable": true },
+        { "name": "tenant" },
+        { "name": "player", "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "closeTicket",
+      "discriminator": number[],
+      "accounts": [
+        { "name": "ticket", "writable": true },
+        { "name": "tenant" },
+        { "name": "player", "writable": true, "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "commitTickets",
+      "discriminator": number[],
+      "accounts": [
+        { "name": "tenant" },
+        { "name": "payer", "writable": true, "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "createTicket",
+      "discriminator": number[],
+      "accounts": [
+        { "name": "ticket", "writable": true },
+        { "name": "tenant" },
+        { "name": "player", "writable": true, "signer": true },
+        { "name": "systemProgram", "address": "11111111111111111111111111111111" }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegateQueue",
+      "discriminator": number[],
+      "accounts": [
+        { "name": "bufferPda", "writable": true },
+        { "name": "delegationRecordPda", "writable": true },
+        { "name": "delegationMetadataPda", "writable": true },
+        { "name": "pda", "writable": true },
+        { "name": "payer", "writable": true, "signer": true },
+        { "name": "validator", "optional": true },
+        { "name": "ownerProgram" },
+        { "name": "delegationProgram" },
+        { "name": "systemProgram", "address": "11111111111111111111111111111111" }
       ],
       "args": [
         {
           "name": "accountType",
-          "type": {
-            "defined": {
-              "name": "accountType"
-            }
-          }
+          "type": { "defined": { "name": "accountType" } }
         }
       ]
     },
     {
-      "name": "initializeQueue",
-      "discriminator": [
-        174,
-        102,
-        132,
-        232,
-        90,
-        202,
-        27,
-        20
-      ],
+      "name": "delegateTicket",
+      "discriminator": number[],
       "accounts": [
+        { "name": "bufferPda", "writable": true },
+        { "name": "delegationRecordPda", "writable": true },
+        { "name": "delegationMetadataPda", "writable": true },
+        { "name": "pda", "writable": true },
+        { "name": "payer", "writable": true, "signer": true },
+        { "name": "validator", "optional": true },
+        { "name": "ownerProgram" },
+        { "name": "delegationProgram" },
+        { "name": "systemProgram", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [
         {
-          "name": "queue",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  113,
-                  117,
-                  101,
-                  117,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "authority"
-              }
-            ]
-          }
-        },
-        {
-          "name": "tenant"
-        },
-        {
-          "name": "authority",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
+          "name": "accountType",
+          "type": { "defined": { "name": "accountType" } }
         }
+      ]
+    },
+    {
+      "name": "flushMatches",
+      "discriminator": number[],
+      "accounts": [
+        { "name": "queue", "writable": true },
+        { "name": "tenant" },
+        { "name": "signer", "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "initializeQueue",
+      "discriminator": number[],
+      "accounts": [
+        { "name": "queue", "writable": true },
+        { "name": "tenant" },
+        { "name": "authority", "writable": true, "signer": true },
+        { "name": "systemProgram", "address": "11111111111111111111111111111111" }
       ],
       "args": []
     },
     {
       "name": "initializeTenant",
-      "discriminator": [
-        94,
-        120,
-        34,
-        186,
-        57,
-        167,
-        241,
-        206
-      ],
+      "discriminator": number[],
       "accounts": [
-        {
-          "name": "tenant",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  101,
-                  110,
-                  97,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "authority"
-              }
-            ]
-          }
-        },
-        {
-          "name": "authority",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
-        }
+        { "name": "tenant", "writable": true },
+        { "name": "authority", "writable": true, "signer": true },
+        { "name": "systemProgram", "address": "11111111111111111111111111111111" }
       ],
       "args": [
-        {
-          "name": "tenantProgramId",
-          "type": "pubkey"
-        },
-        {
-          "name": "eloOffset",
-          "type": "u32"
-        },
-        {
-          "name": "eloSize",
-          "type": "u8"
-        },
-        {
-          "name": "eloWindow",
-          "type": "u64"
-        }
+        { "name": "tenantProgramId", "type": "pubkey" },
+        { "name": "eloOffset", "type": "u32" },
+        { "name": "eloSize", "type": "u8" },
+        { "name": "eloWindow", "type": "u64" },
+        { "name": "callbackProgramId", "type": { "option": "pubkey" } },
+        { "name": "callbackDiscriminator", "type": { "option": { "array": ["u8", 8] } } }
       ]
     },
     {
       "name": "joinQueue",
-      "discriminator": [
-        157,
-        115,
-        48,
-        109,
-        65,
-        86,
-        203,
-        238
-      ],
+      "discriminator": number[],
       "accounts": [
-        {
-          "name": "queue",
-          "writable": true
-        },
-        {
-          "name": "tenant"
-        },
-        {
-          "name": "playerData",
-          "writable": true
-        },
-        {
-          "name": "signer",
-          "signer": true
-        }
+        { "name": "queue", "writable": true },
+        { "name": "tenant" },
+        { "name": "playerData", "writable": true },
+        { "name": "playerTicket", "writable": true },
+        { "name": "signer", "signer": true }
       ],
       "args": []
     },
     {
       "name": "processUndelegation",
-      "discriminator": [
-        196,
-        28,
-        41,
-        206,
-        48,
-        37,
-        51,
-        167
-      ],
+      "discriminator": number[],
       "accounts": [
-        {
-          "name": "baseAccount",
-          "writable": true
-        },
-        {
-          "name": "buffer"
-        },
-        {
-          "name": "payer",
-          "writable": true
-        },
-        {
-          "name": "systemProgram"
-        }
+        { "name": "baseAccount", "writable": true },
+        { "name": "buffer" },
+        { "name": "payer", "writable": true },
+        { "name": "systemProgram" }
       ],
       "args": [
-        {
-          "name": "accountSeeds",
-          "type": {
-            "vec": "bytes"
-          }
-        }
+        { "name": "accountSeeds", "type": { "vec": "bytes" } }
       ]
     }
   ],
   "accounts": [
     {
+      "name": "matchTicket",
+      "discriminator": number[]
+    },
+    {
       "name": "queue",
-      "discriminator": [
-        204,
-        167,
-        6,
-        247,
-        20,
-        33,
-        2,
-        188
-      ]
+      "discriminator": number[]
     },
     {
       "name": "tenant",
-      "discriminator": [
-        61,
-        43,
-        215,
-        51,
-        232,
-        242,
-        209,
-        170
-      ]
+      "discriminator": number[]
     }
   ],
   "errors": [
-    {
-      "code": 6000,
-      "name": "invalidTenant",
-      "msg": "Account does not belong to the specified Tenant Program"
-    },
-    {
-      "code": 6001,
-      "name": "dataTooSmall",
-      "msg": "Account data too small for ELO read"
-    },
-    {
-      "code": 6002,
-      "name": "unauthorized",
-      "msg": "Unauthorized access"
-    },
-    {
-      "code": 6003,
-      "name": "invalidEloSize",
-      "msg": "Invalid ELO size (must be 1, 2, 4, or 8 bytes)"
-    }
+    { "code": 6000, "name": "invalidTenant", "msg": "Account does not belong to the specified Tenant Program" },
+    { "code": 6001, "name": "dataTooSmall", "msg": "Account data too small for ELO read" },
+    { "code": 6002, "name": "unauthorized", "msg": "Unauthorized access" },
+    { "code": 6003, "name": "invalidEloSize", "msg": "Invalid ELO size (must be 1, 2, 4, or 8 bytes)" },
+    { "code": 6004, "name": "invalidTicketStatus", "msg": "Invalid ticket status for this operation" },
+    { "code": 6005, "name": "invalidTicketAccount", "msg": "Invalid ticket account" }
   ],
   "types": [
     {
@@ -436,12 +189,40 @@ export type Duel = {
           {
             "name": "queue",
             "fields": [
-              {
-                "name": "authority",
-                "type": "pubkey"
-              }
+              { "name": "authority", "type": "pubkey" }
+            ]
+          },
+          {
+            "name": "ticket",
+            "fields": [
+              { "name": "player", "type": "pubkey" },
+              { "name": "tenant", "type": "pubkey" }
             ]
           }
+        ]
+      }
+    },
+    {
+      "name": "matchTicket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "player", "type": "pubkey" },
+          { "name": "tenant", "type": "pubkey" },
+          { "name": "status", "type": { "defined": { "name": "ticketStatus" } } },
+          { "name": "createdAt", "type": "i64" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "pendingMatch",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "player", "type": "pubkey" },
+          { "name": "opponent", "type": "pubkey" },
+          { "name": "matchId", "type": "u64" }
         ]
       }
     },
@@ -450,28 +231,13 @@ export type Duel = {
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "tenant",
-            "type": "pubkey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "entries",
-            "type": {
-              "vec": {
-                "defined": {
-                  "name": "queueEntry"
-                }
-              }
-            }
-          }
+          { "name": "authority", "type": "pubkey" },
+          { "name": "tenant", "type": "pubkey" },
+          { "name": "bump", "type": "u8" },
+          { "name": "matchCounter", "type": "u64" },
+          { "name": "entries", "type": { "vec": { "defined": { "name": "queueEntry" } } } },
+          { "name": "matches", "type": { "vec": { "defined": { "name": "matchEntry" } } } },
+          { "name": "pendingMatches", "type": { "vec": { "defined": { "name": "pendingMatch" } } } }
         ]
       }
     },
@@ -480,14 +246,20 @@ export type Duel = {
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "elo",
-            "type": "u64"
-          }
+          { "name": "player", "type": "pubkey" },
+          { "name": "elo", "type": "u64" }
+        ]
+      }
+    },
+    {
+      "name": "matchEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "player1", "type": "pubkey" },
+          { "name": "player2", "type": "pubkey" },
+          { "name": "matchId", "type": "u64" },
+          { "name": "timestamp", "type": "i64" }
         ]
       }
     },
@@ -496,26 +268,31 @@ export type Duel = {
       "type": {
         "kind": "struct",
         "fields": [
+          { "name": "authority", "type": "pubkey" },
+          { "name": "tenantProgramId", "type": "pubkey" },
+          { "name": "eloOffset", "type": "u32" },
+          { "name": "eloSize", "type": "u8" },
+          { "name": "eloWindow", "type": "u64" },
+          { "name": "callbackProgramId", "type": { "option": "pubkey" } },
+          { "name": "callbackDiscriminator", "type": { "option": { "array": ["u8", 8] } } }
+        ]
+      }
+    },
+    {
+      "name": "ticketStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          { "name": "searching" },
           {
-            "name": "authority",
-            "type": "pubkey"
+            "name": "matched",
+            "fields": [
+              { "name": "opponent", "type": "pubkey" },
+              { "name": "matchId", "type": "u64" }
+            ]
           },
-          {
-            "name": "tenantProgramId",
-            "type": "pubkey"
-          },
-          {
-            "name": "eloOffset",
-            "type": "u32"
-          },
-          {
-            "name": "eloSize",
-            "type": "u8"
-          },
-          {
-            "name": "eloWindow",
-            "type": "u64"
-          }
+          { "name": "expired" },
+          { "name": "cancelled" }
         ]
       }
     }
