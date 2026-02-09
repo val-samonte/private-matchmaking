@@ -2,16 +2,18 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import { useWalletContext } from "@/lib/contexts/WalletContext";
+import { connectionAtom } from "@/lib/atoms/program";
 import { playerProfileAtom, playerProfilePdaAtom, hasProfileAtom } from "@/lib/atoms/player";
 import { RPS_GAME_PROGRAM_ID } from "@/lib/constants";
+import { createL1Provider } from "@/lib/utils/tee";
 import type { RpsGame } from "@/lib/types/rps_game_idl";
 import IDL from "@/lib/types/rps_game.json";
 
 export function usePlayerProfile() {
-  const wallet = useWallet();
-  const { connection } = useConnection();
+  const { publicKey, anchorWallet } = useWalletContext();
+  const connection = useAtomValue(connectionAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
   const [profile, setProfile] = useAtom(playerProfileAtom);
   const hasProfile = useAtomValue(hasProfileAtom);
@@ -20,7 +22,7 @@ export function usePlayerProfile() {
 
   // Fetch profile data
   useEffect(() => {
-    if (!profilePda || !wallet.publicKey) {
+    if (!profilePda || !publicKey || !anchorWallet) {
       setProfile(null);
       return;
     }
@@ -29,9 +31,7 @@ export function usePlayerProfile() {
 
     const fetchProfile = async () => {
       try {
-        const provider = new AnchorProvider(connection, wallet as any, {
-          commitment: "confirmed",
-        });
+        const provider = createL1Provider(connection, anchorWallet);
         const program = new Program(IDL as any, provider) as Program<RpsGame>;
 
         const profileData = await program.account.playerProfile.fetch(profilePda);
@@ -51,11 +51,11 @@ export function usePlayerProfile() {
     return () => {
       isMounted = false;
     };
-  }, [profilePda, wallet.publicKey, connection]);
+  }, [profilePda, publicKey, connection, anchorWallet]);
 
   // Initialize profile
   const initializeProfile = async () => {
-    if (!wallet.publicKey || !wallet.signTransaction) {
+    if (!publicKey || !anchorWallet) {
       throw new Error("Wallet not connected");
     }
 
@@ -63,16 +63,14 @@ export function usePlayerProfile() {
     setError(null);
 
     try {
-      const provider = new AnchorProvider(connection, wallet as any, {
-        commitment: "confirmed",
-      });
+      const provider = createL1Provider(connection, anchorWallet);
       const program = new Program(IDL as any, provider) as Program<RpsGame>;
 
       await program.methods
         .initializePlayer()
         .accounts({
-          player: wallet.publicKey,
-          payer: wallet.publicKey,
+          player: publicKey,
+          payer: publicKey,
         })
         .rpc();
 
@@ -95,4 +93,3 @@ export function usePlayerProfile() {
     initializeProfile,
   };
 }
-

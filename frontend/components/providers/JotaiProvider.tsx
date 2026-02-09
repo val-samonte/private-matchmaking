@@ -2,11 +2,11 @@
 
 import { FC, ReactNode, useEffect } from "react";
 import { Provider, useSetAtom } from "jotai";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletContext } from "@/lib/contexts/WalletContext";
 import { walletAtom, walletConnectedAtom } from "@/lib/atoms/wallet";
 
 const WalletSync: FC = () => {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected } = useWalletContext();
   const setWallet = useSetAtom(walletAtom);
   const setWalletConnected = useSetAtom(walletConnectedAtom);
 

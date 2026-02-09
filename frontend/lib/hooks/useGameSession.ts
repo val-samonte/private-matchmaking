@@ -1,42 +1,43 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useAtomValue } from "jotai";
-import { PublicKey } from "@solana/web3.js";
-import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
+import { PublicKey, Connection } from "@solana/web3.js";
+import { Program, BN } from "@coral-xyz/anchor";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
-import { getTeeAuthToken, createTeeProvider, waitForDelegation } from "@/lib/utils/tee";
+import { connectionAtom } from "@/lib/atoms/program";
+import { useWalletContext } from "@/lib/contexts/WalletContext";
+import { getTeeAuthToken, createTeeProvider, waitForDelegation, createL1Provider } from "@/lib/utils/tee";
 import { deriveGameSessionPda, derivePlayerProfilePda, deriveTicketPda, deriveTenantPda } from "@/lib/utils/pda";
-import { 
-  RPS_GAME_PROGRAM_ID, 
-  TEE_RPC_URL, 
-  TEE_WS_URL, 
+import {
+  RPS_GAME_PROGRAM_ID,
+  TEE_RPC_URL,
+  TEE_WS_URL,
   ER_VALIDATOR,
   QUEUE_AUTHORITY,
-  DUEL_PROGRAM_ID 
+  DUEL_PROGRAM_ID
 } from "@/lib/constants";
 import IDL from "@/lib/types/rps_game.json";
 import type { RpsGame } from "@/lib/types/rps_game_idl";
 import { Choice, GameResult, choiceToAnchor, parseGameResult } from "@/lib/types/rps";
 
-export type GameSessionState = 
-  | "idle" 
-  | "starting" 
+export type GameSessionState =
+  | "idle"
+  | "starting"
   | "delegating"
   | "ready"
-  | "waiting_choice" 
-  | "waiting_opponent" 
+  | "waiting_choice"
+  | "waiting_opponent"
   | "resolving"
   | "persisting"
   | "complete"
   | "error";
 
 export function useGameSession() {
-  const wallet = useWallet();
-  const { connection } = useConnection();
+  const { publicKey, anchorWallet } = useWalletContext();
+  const connection = useAtomValue(connectionAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
-  
+
   const [gameState, setGameState] = useState<GameSessionState>("idle");
   const [gameSessionPda, setGameSessionPda] = useState<PublicKey | null>(null);
   const [opponent, setOpponent] = useState<PublicKey | null>(null);
@@ -46,7 +47,7 @@ export function useGameSession() {
   const [error, setError] = useState<string | null>(null);
 
   const startGame = useCallback(async (opponentPubkey: PublicKey, newGameId: number, role: "player1" | "player2") => {
-    if (!wallet.publicKey || !profilePda) {
+    if (!publicKey || !profilePda || !anchorWallet) {
       throw new Error("Wallet not connected or profile not found");
     }
 
@@ -54,7 +55,7 @@ export function useGameSession() {
       setGameState("starting");
       setError(null);
       setOpponent(opponentPubkey);
-      
+
       const gameIdBN = new BN(newGameId);
       setGameId(gameIdBN);
 
@@ -64,8 +65,8 @@ export function useGameSession() {
 
       // 1. Derive game session PDA
       const [sessionPda] = deriveGameSessionPda(
-        role === "player1" ? wallet.publicKey : opponentPubkey,
-        role === "player1" ? opponentPubkey : wallet.publicKey,
+        role === "player1" ? publicKey : opponentPubkey,
+        role === "player1" ? opponentPubkey : publicKey,
         gameIdBN,
         RPS_GAME_PROGRAM_ID
       );
@@ -74,50 +75,50 @@ export function useGameSession() {
 
       if (role === "player1") {
         // PLAYER 1: Create and Delegate
-        const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
+        const provider = createL1Provider(connection, anchorWallet);
         const program = new Program(IDL as any, provider) as Program<RpsGame>;
-        
+
         // Derive MatchTicket PDA
         const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
-        const [ticketPda] = deriveTicketPda(wallet.publicKey, tenantPda, DUEL_PROGRAM_ID);
+        const [ticketPda] = deriveTicketPda(publicKey, tenantPda, DUEL_PROGRAM_ID);
 
         console.log("P1: Calling start_game_with_ticket instruction...");
         await program.methods
           .startGameWithTicket(gameIdBN, opponentPubkey)
           .accounts({
-            player: wallet.publicKey,
+            player: publicKey,
             matchTicket: ticketPda,
           } as any)
           .rpc();
-        
+
         console.log("P1: Game started on L1");
 
         // Delegate game session
         setGameState("delegating");
         console.log("P1: Delegating game session...");
-        
+
         await program.methods
-          .delegatePda({ 
-            gameSession: { 
-              p1: wallet.publicKey, 
-              p2: opponentPubkey, 
-              id: gameIdBN 
-            } 
+          .delegatePda({
+            gameSession: {
+              p1: publicKey,
+              p2: opponentPubkey,
+              id: gameIdBN
+            }
           })
           .accounts({
             pda: sessionPda,
-            payer: wallet.publicKey,
+            payer: publicKey,
             validator: ER_VALIDATOR,
           } as any)
           .rpc();
       } else {
         // PLAYER 2: Wait for delegation
         console.log("P2: Waiting for P1 to create and delegate game...");
-        setGameState("delegating"); // Re-use delegating state for waiting
+        setGameState("delegating");
       }
 
       // Both players wait for delegation to be active
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
+      const { token } = await getTeeAuthToken(TEE_RPC_URL, anchorWallet);
       console.log("Waiting for game session delegation propagation...");
       await waitForDelegation(TEE_RPC_URL, token, sessionPda);
       console.log("Game session delegated and active!");
@@ -125,16 +126,14 @@ export function useGameSession() {
       setGameState("ready");
     } catch (err: any) {
       console.error("Start game error:", err);
-      // If P2 and error is "Account not initialized" maybe wait more? 
-      // But waitForDelegation handles retries.
       setError(err.message || "Failed to start game");
       setGameState("error");
       throw err;
     }
-  }, [wallet, connection, profilePda]);
+  }, [publicKey, connection, profilePda, anchorWallet]);
 
   const makeChoice = useCallback(async (choice: Choice) => {
-    if (!wallet.publicKey || !gameSessionPda || !profilePda || !opponent) {
+    if (!publicKey || !gameSessionPda || !profilePda || !opponent || !anchorWallet) {
       throw new Error("Game not started");
     }
 
@@ -146,8 +145,8 @@ export function useGameSession() {
       console.log("Making choice:", choice);
 
       // Get TEE provider
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
-      const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, wallet);
+      const { token: teeToken } = await getTeeAuthToken(TEE_RPC_URL, anchorWallet);
+      const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, teeToken, anchorWallet);
       const teeProgram = new Program(IDL as any, teeProvider) as Program<RpsGame>;
 
       // Derive opponent profile PDA
@@ -161,7 +160,7 @@ export function useGameSession() {
           gameSession: gameSessionPda,
           player1Profile: profilePda,
           player2Profile: opponentProfilePda,
-          player: wallet.publicKey,
+          player: publicKey,
         })
         .rpc();
 
@@ -171,7 +170,7 @@ export function useGameSession() {
       setGameState("resolving");
       console.log("Waiting for opponent's choice...");
       await pollForGameResult(teeProgram, gameSessionPda, setResult);
-      
+
       setGameState("complete");
 
     } catch (err: any) {
@@ -180,10 +179,10 @@ export function useGameSession() {
       setGameState("error");
       throw err;
     }
-  }, [wallet, gameSessionPda, profilePda, opponent]);
+  }, [publicKey, gameSessionPda, profilePda, opponent, anchorWallet]);
 
   const persistResults = useCallback(async () => {
-    if (!wallet.publicKey || !gameSessionPda || !profilePda || !opponent) {
+    if (!publicKey || !gameSessionPda || !profilePda || !opponent || !anchorWallet) {
       throw new Error("Game not complete");
     }
 
@@ -193,8 +192,8 @@ export function useGameSession() {
 
       console.log("Persisting results to L1...");
 
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, wallet);
-      const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, wallet);
+      const { token: teeToken } = await getTeeAuthToken(TEE_RPC_URL, anchorWallet);
+      const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, teeToken, anchorWallet);
       const teeProgram = new Program(IDL as any, teeProvider) as Program<RpsGame>;
 
       const [opponentProfilePda] = derivePlayerProfilePda(opponent, RPS_GAME_PROGRAM_ID);
@@ -205,7 +204,7 @@ export function useGameSession() {
           gameSession: gameSessionPda,
           player1Profile: profilePda,
           player2Profile: opponentProfilePda,
-          payer: wallet.publicKey,
+          payer: publicKey,
         })
         .rpc();
 
@@ -217,7 +216,7 @@ export function useGameSession() {
       setGameState("error");
       throw err;
     }
-  }, [wallet, gameSessionPda, profilePda, opponent]);
+  }, [publicKey, gameSessionPda, profilePda, opponent, anchorWallet]);
 
   const reset = useCallback(() => {
     setGameState("idle");
@@ -254,10 +253,10 @@ async function pollForGameResult(
 ): Promise<void> {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, pollInterval));
-    
+
     try {
       const session = await program.account.gameSession.fetch(sessionPda);
-      
+
       // Check if both players have made choices
       if (session.player1Choice !== null && session.player2Choice !== null) {
         console.log("Both players have chosen - game resolved");
@@ -265,12 +264,12 @@ async function pollForGameResult(
         setResult(parsedResult);
         return;
       }
-      
+
       console.log(`Polling attempt ${i + 1}/${maxAttempts} - waiting for opponent...`);
     } catch (err) {
       console.error("Poll error:", err);
     }
   }
-  
+
   throw new Error("Game resolution timed out");
 }

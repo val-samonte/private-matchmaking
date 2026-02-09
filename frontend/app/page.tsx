@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletContext } from "@/lib/contexts/WalletContext";
 import { WalletButton } from "@/components/WalletButton";
 import { ProfileCard } from "@/components/ProfileCard";
 import { CreateProfileButton } from "@/components/CreateProfileButton";
@@ -13,7 +13,7 @@ import { usePlayerProfile } from "@/lib/hooks/usePlayerProfile";
 type PageState = "menu" | "matchmaking" | "game";
 
 export default function HomePage() {
-  const { connected } = useWallet();
+  const { connected } = useWalletContext();
   const { hasProfile } = usePlayerProfile();
   
   const [pageState, setPageState] = useState<PageState>("menu");
