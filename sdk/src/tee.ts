@@ -45,36 +45,46 @@ export async function getAuthToken(
 }
 
 /**
- * Poll the TEE /permission endpoint until the given PDA has authorized users,
- * indicating delegation is active. Throws on timeout.
+ * Poll the TEE /permission endpoint until the given PDA shows delegation is active.
  *
- * IMPORTANT: the /permission endpoint must be called WITHOUT the auth token.
- * Polling /permission?token=JWT&pubkey=PDA returns per-user access (always empty
- * until you're explicitly added), not the global delegation activation status.
- * The reference implementation (anchor-rock-paper-scissor) confirms this by
- * passing the bare endpoint URL with no token.
+ * IMPORTANT: `authorizedUsers` is only populated for PER-group delegation. For
+ * DELeGG-based delegation (what this project uses), this function logs the full
+ * response on timeout so we can identify the correct field. It does NOT throw on
+ * timeout — the TEE operation itself is the real failure signal.
+ *
+ * The /permission endpoint is always called WITHOUT the auth token.
+ * /permission?token=JWT&pubkey=PDA returns per-user access (always empty unless
+ * explicitly granted via PER groups), not global delegation activation status.
  */
 export async function waitUntilPermissionActive(
   teeUrlWithToken: string,
   pda: Address,
-  timeoutMs = 120000,
-): Promise<void> {
-  // Always strip the token — /permission?pubkey=PDA is the correct check
+  timeoutMs = 15000,
+): Promise<boolean> {
+  // Always strip the token — /permission?pubkey=PDA is the correct global check
   const [baseUrl] = teeUrlWithToken.replace("/?", "?").split("?");
   const permissionUrl = `${baseUrl}/permission?pubkey=${pda}`;
 
   const start = Date.now();
+  let lastResponse: unknown = null;
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(permissionUrl);
       if (res.ok) {
-        const { authorizedUsers } = (await res.json()) as { authorizedUsers?: unknown[] };
-        if (authorizedUsers && authorizedUsers.length > 0) return;
+        const json = (await res.json()) as Record<string, unknown>;
+        lastResponse = json;
+        const { authorizedUsers } = json as { authorizedUsers?: unknown[] };
+        if (authorizedUsers && authorizedUsers.length > 0) {
+          console.log(`[TEE] ${pda.slice(0, 16)}... delegation active`);
+          return true;
+        }
       }
     } catch {
       // ignore transient errors, keep polling
     }
     await new Promise((r) => setTimeout(r, 400));
   }
-  throw new Error(`Delegation timeout: PDA ${pda} did not become active in TEE within ${timeoutMs}ms`);
+  // Warn with full response to diagnose which field to check for DELeGG delegation
+  console.warn(`[TEE] ${pda.slice(0, 16)}... not confirmed after ${timeoutMs}ms. /permission response: ${JSON.stringify(lastResponse)}`);
+  return false;
 }

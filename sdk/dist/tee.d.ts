@@ -8,13 +8,15 @@ export declare function getAuthToken(rpcUrl: string, signer: MessagePartialSigne
     expiresAt: number;
 }>;
 /**
- * Poll the TEE /permission endpoint until the given PDA has authorized users,
- * indicating delegation is active. Throws on timeout.
+ * Poll the TEE /permission endpoint until the given PDA shows delegation is active.
  *
- * IMPORTANT: the /permission endpoint must be called WITHOUT the auth token.
- * Polling /permission?token=JWT&pubkey=PDA returns per-user access (always empty
- * until you're explicitly added), not the global delegation activation status.
- * The reference implementation (anchor-rock-paper-scissor) confirms this by
- * passing the bare endpoint URL with no token.
+ * IMPORTANT: `authorizedUsers` is only populated for PER-group delegation. For
+ * DELeGG-based delegation (what this project uses), this function logs the full
+ * response on timeout so we can identify the correct field. It does NOT throw on
+ * timeout — the TEE operation itself is the real failure signal.
+ *
+ * The /permission endpoint is always called WITHOUT the auth token.
+ * /permission?token=JWT&pubkey=PDA returns per-user access (always empty unless
+ * explicitly granted via PER groups), not global delegation activation status.
  */
-export declare function waitUntilPermissionActive(teeUrlWithToken: string, pda: Address, timeoutMs?: number): Promise<void>;
+export declare function waitUntilPermissionActive(teeUrlWithToken: string, pda: Address, timeoutMs?: number): Promise<boolean>;
