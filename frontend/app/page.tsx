@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { PublicKey } from "@solana/web3.js";
+import { Suspense, useState } from "react";
+import type { Address } from "@solana/kit";
 import { useWalletContext } from "@/lib/contexts/WalletContext";
 import { WalletButton } from "@/components/WalletButton";
 import { ProfileCard } from "@/components/ProfileCard";
@@ -12,17 +12,17 @@ import { usePlayerProfile } from "@/lib/hooks/usePlayerProfile";
 
 type PageState = "menu" | "matchmaking" | "game";
 
-export default function HomePage() {
+function HomeContent() {
   const { connected } = useWalletContext();
   const { hasProfile } = usePlayerProfile();
-  
+
   const [pageState, setPageState] = useState<PageState>("menu");
-  const [opponent, setOpponent] = useState<PublicKey | null>(null);
+  const [opponent, setOpponent] = useState<Address | null>(null);
   const [gameId, setGameId] = useState<number | null>(null);
   const [role, setRole] = useState<"player1" | "player2" | null>(null);
 
-  const handleMatchFound = (opponentPubkey: PublicKey, newGameId: number, playerRole: "player1" | "player2") => {
-    setOpponent(opponentPubkey);
+  const handleMatchFound = (opponentAddr: Address, newGameId: number, playerRole: "player1" | "player2") => {
+    setOpponent(opponentAddr);
     setGameId(newGameId);
     setRole(playerRole);
     setPageState("game");
@@ -50,9 +50,9 @@ export default function HomePage() {
 
         {/* Game State */}
         {pageState === "game" && opponent && gameId !== null ? (
-          <GameBoard 
-            opponent={opponent} 
-            gameId={gameId} 
+          <GameBoard
+            opponent={opponent}
+            gameId={gameId}
             role={role!}
             onGameComplete={handleGameComplete}
           />
@@ -85,7 +85,7 @@ export default function HomePage() {
                 <div className="text-center text-foreground-muted">
                   <p>Connect your wallet to get started</p>
                   <p className="text-sm mt-2">
-                    You'll need to create an on-chain account (costs ~0.002 SOL)
+                    You&apos;ll need to create an on-chain account (costs ~0.002 SOL)
                   </p>
                 </div>
               )}
@@ -121,5 +121,13 @@ export default function HomePage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <HomeContent />
+    </Suspense>
   );
 }

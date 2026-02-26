@@ -1,30 +1,45 @@
-import * as web3 from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import {
+  getProgramDerivedAddress,
+  getAddressEncoder,
+  getUtf8Encoder,
+  type Address,
+} from "@solana/kit";
+
+const addressEncoder = getAddressEncoder();
+const utf8Encoder = getUtf8Encoder();
 
 export const QUEUE_SEED = "queue";
 export const TENANT_SEED = "tenant";
 export const TICKET_SEED = "ticket";
 
-export function deriveQueuePda(programId: web3.PublicKey, authority: web3.PublicKey): web3.PublicKey {
-    const [pda] = web3.PublicKey.findProgramAddressSync(
-        [Buffer.from(QUEUE_SEED), authority.toBuffer()],
-        programId
-    );
-    return pda;
+export async function deriveQueuePda(programId: Address, authority: Address): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [utf8Encoder.encode(QUEUE_SEED), addressEncoder.encode(authority)],
+  });
+  return pda;
 }
 
-export function deriveTenantPda(programId: web3.PublicKey, authority: web3.PublicKey): web3.PublicKey {
-    const [pda] = web3.PublicKey.findProgramAddressSync(
-        [Buffer.from(TENANT_SEED), authority.toBuffer()],
-        programId
-    );
-    return pda;
+export async function deriveTenantPda(programId: Address, authority: Address): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [utf8Encoder.encode(TENANT_SEED), addressEncoder.encode(authority)],
+  });
+  return pda;
 }
 
-export function deriveTicketPda(programId: web3.PublicKey, player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
-    const [pda] = web3.PublicKey.findProgramAddressSync(
-        [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
-        programId
-    );
-    return pda;
+export async function deriveTicketPda(
+  programId: Address,
+  player: Address,
+  tenant: Address
+): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [
+      utf8Encoder.encode(TICKET_SEED),
+      addressEncoder.encode(player),
+      addressEncoder.encode(tenant),
+    ],
+  });
+  return pda;
 }

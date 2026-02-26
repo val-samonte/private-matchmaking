@@ -1,10 +1,10 @@
 import { atom } from "jotai";
-import { PublicKey } from "@solana/web3.js";
+import type { Address } from "@solana/kit";
 
 /**
- * Wallet public key atom
+ * Wallet address atom (Kit Address = string brand)
  */
-export const walletAtom = atom<PublicKey | null>(null);
+export const walletAtom = atom<Address | null>(null);
 
 /**
  * Wallet connected state atom

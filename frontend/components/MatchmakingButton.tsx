@@ -1,10 +1,10 @@
 "use client";
 
+import type { Address } from "@solana/kit";
 import { useMatchmaking } from "@/lib/hooks/useMatchmaking";
-import { PublicKey } from "@solana/web3.js";
 
 interface MatchmakingButtonProps {
-  onMatchFound: (opponent: PublicKey, gameId: number, role: "player1" | "player2") => void;
+  onMatchFound: (opponent: Address, gameId: number, role: "player1" | "player2") => void;
 }
 
 export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
@@ -17,7 +17,7 @@ export function MatchmakingButton({ onMatchFound }: MatchmakingButtonProps) {
       try {
         const match = await findMatch();
         if (match) {
-          onMatchFound(new PublicKey(match.opponent), parseInt(match.matchId), match.role);
+          onMatchFound(match.opponent as Address, parseInt(match.matchId), match.role);
         }
       } catch (err) {
         console.error("Matchmaking error:", err);

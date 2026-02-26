@@ -1,211 +1,177 @@
-import * as anchor from "@coral-xyz/anchor";
-import { BN } from "bn.js";
-import * as web3 from "@solana/web3.js";
-import type { Duel } from "./types.js";
-import IDL from "./duel.json" with { type: "json" };
+import {
+  createSolanaRpc,
+  type Address,
+  type TransactionSigner,
+  type Rpc,
+  type SolanaRpcApi,
+} from "@solana/kit";
+import {
+  getInitializeTenantInstructionAsync,
+  getInitializeQueueInstructionAsync,
+  getDelegateQueueInstructionAsync,
+  getFlushMatchesInstruction,
+  getCommitTicketsInstruction,
+  fetchQueue,
+  accountType,
+} from "./generated/duel/index.js";
+import { sendInstruction } from "./transaction.js";
 import * as utils from "./utils.js";
 
-const TICKET_SEED = "ticket";
-
-export type EloDataType = 'u8' | 'u16' | 'u32' | 'u64';
+export type EloDataType = "u8" | "u16" | "u32" | "u64";
 
 export interface InitializeTenantOptions {
-  authority?: web3.PublicKey;
-  eloWindow?: number;
+  authority?: Address;
+  eloWindow?: bigint;
   eloOffset?: number;
   eloDataType?: EloDataType;
-  callbackProgramId?: web3.PublicKey | null;
+  callbackProgramId?: Address | null;
   callbackDiscriminator?: number[] | null;
 }
 
 function getEloSize(dataType: EloDataType): number {
   switch (dataType) {
-    case 'u8': return 1;
-    case 'u16': return 2;
-    case 'u32': return 4;
-    case 'u64': return 8;
+    case "u8": return 1;
+    case "u16": return 2;
+    case "u32": return 4;
+    case "u64": return 8;
   }
 }
 
+const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
+
 export class MatchmakingAdmin {
-  public program: anchor.Program<Duel>;
-  public provider: anchor.AnchorProvider;
+  public rpc: Rpc<SolanaRpcApi>;
+  public signer: TransactionSigner;
+  public programId: Address;
 
-  constructor(provider: anchor.AnchorProvider, programId: web3.PublicKey | string) {
-    const address = typeof programId === "string" ? programId : programId.toBase58();
-    const idl = { ...IDL, address };
-    this.program = new anchor.Program(idl as any, provider);
-    this.provider = provider;
+  constructor(
+    rpc: Rpc<SolanaRpcApi>,
+    signer: TransactionSigner,
+    programId: Address = DUEL_PROGRAM_ID,
+  ) {
+    this.rpc = rpc;
+    this.signer = signer;
+    this.programId = programId;
   }
 
-  // Derive PDAs Helpers
-  getQueuePda(authority: web3.PublicKey): web3.PublicKey {
-    return utils.deriveQueuePda(this.program.programId, authority);
+  async getQueuePda(authority: Address): Promise<Address> {
+    return utils.deriveQueuePda(this.programId, authority);
   }
 
-  getTenantPda(authority: web3.PublicKey): web3.PublicKey {
-    return utils.deriveTenantPda(this.program.programId, authority);
+  async getTenantPda(authority: Address): Promise<Address> {
+    return utils.deriveTenantPda(this.programId, authority);
   }
 
-  getTicketPda(player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
-    return utils.deriveTicketPda(this.program.programId, player, tenant);
+  async getTicketPda(player: Address, tenant: Address): Promise<Address> {
+    return utils.deriveTicketPda(this.programId, player, tenant);
   }
 
-  /**
-   * Fetch Queue account data
-   */
-  async getQueue(queuePda: web3.PublicKey): Promise<any> {
-    return await this.program.account.queue.fetch(queuePda);
+  async getQueue(queuePda: Address) {
+    return fetchQueue(this.rpc, queuePda);
   }
 
-  /**
-   * Fetch Tenant account data
-   */
-  async getTenant(tenantPda: web3.PublicKey): Promise<any> {
-    return await this.program.account.tenant.fetch(tenantPda);
-  }
-
-  /**
-   * Initialize a Tenant (with optional callback config)
-   */
   async initializeTenant(
-    tenantProgramId: web3.PublicKey,
+    tenantProgramId: Address,
     options?: InitializeTenantOptions,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
+  ): Promise<string> {
     const {
-      authority = tenantProgramId,
-      eloWindow = 100,
+      eloWindow = 100n,
       eloOffset = 40,
-      eloDataType = 'u16',
+      eloDataType = "u16",
       callbackProgramId = null,
       callbackDiscriminator = null,
     } = options || {};
 
     const eloSize = getEloSize(eloDataType);
-    const tenantPda = this.getTenantPda(authority);
+    const ix = await getInitializeTenantInstructionAsync({
+      authority: this.signer,
+      tenantProgramId,
+      eloOffset,
+      eloSize,
+      eloWindow,
+      callbackProgramId: callbackProgramId ? { __option: "Some", value: callbackProgramId } : { __option: "None" },
+      callbackDiscriminator: callbackDiscriminator
+        ? { __option: "Some", value: new Uint8Array(callbackDiscriminator) }
+        : { __option: "None" },
+    }, { programAddress: this.programId });
 
-    return await this.program.methods
-      .initializeTenant(
-        tenantProgramId,
-        eloOffset,
-        eloSize,
-        new BN(eloWindow),
-        callbackProgramId || null,
-        callbackDiscriminator ? Array.from(Buffer.from(callbackDiscriminator)) : null
-      )
-      .accountsPartial({
-        tenant: tenantPda,
-        authority: authority,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
+    return sendInstruction(this.rpc, ix, this.signer);
   }
 
-  /**
-   * Initialize a Queue
-   */
   async initializeQueue(
-    authority: web3.PublicKey,
-    tenant: web3.PublicKey,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const queuePda = this.getQueuePda(authority);
-    return await this.program.methods
-      .initializeQueue()
-      .accountsPartial({
-        queue: queuePda,
-        tenant: tenant,
-        authority: authority,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
+    _authority: Address,
+    tenant: Address,
+  ): Promise<string> {
+    const ix = await getInitializeQueueInstructionAsync({
+      authority: this.signer,
+      tenant,
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
   }
 
-  /**
-   * Delegate Queue to TEE
-   */
   async delegateQueue(
-    authority: web3.PublicKey,
-    validator: web3.PublicKey = new web3.PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"),
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-      const queuePda = this.getQueuePda(authority);
-      return await this.program.methods
-        .delegateQueue({ queue: { authority } } as any)
-        .accounts({
-            pda: queuePda,
-            payer: authority,
-            validator: validator,
-        } as unknown as any)
-        .signers(signers)
-        .rpc(confirmOptions);
+    authority: Address,
+    validator?: Address,
+  ): Promise<string> {
+    const queuePda = await this.getQueuePda(authority);
+    const ix = await getDelegateQueueInstructionAsync({
+      pda: queuePda,
+      payer: this.signer,
+      validator,
+      accountType: accountType("Queue", { authority }),
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
   }
 
-  /**
-   * Flush pending matches - crank instruction to update opponent tickets
-   * Can be called by any TEE-authenticated wallet (permissionless)
-   */
   async flushMatches(
-    queue: web3.PublicKey,
-    tenant: web3.PublicKey,
-    ticketPdas: web3.PublicKey[],
-    callbackProgram?: web3.PublicKey,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const remainingAccounts = ticketPdas.map(pda => ({
-      pubkey: pda,
-      isSigner: false,
-      isWritable: true,
-    }));
+    queue: Address,
+    tenant: Address,
+    ticketPdas: Address[],
+    callbackProgram?: Address,
+  ): Promise<string> {
+    const ix = getFlushMatchesInstruction({
+      queue,
+      tenant,
+      signer: this.signer,
+    }, { programAddress: this.programId });
 
-    if (callbackProgram) {
-      remainingAccounts.push({
-        pubkey: callbackProgram,
-        isSigner: false,
-        isWritable: false,
-      });
-    }
+    const remainingAccounts = [
+      ...ticketPdas.map((address) => ({ address, role: 1 as const })),
+      ...(callbackProgram ? [{ address: callbackProgram, role: 0 as const }] : []),
+    ];
 
-    return await this.program.methods
-      .flushMatches()
-      .accountsPartial({
-        queue: queue,
-        tenant: tenant,
-        signer: this.provider.publicKey,
-      })
-      .remainingAccounts(remainingAccounts)
-      .signers(signers)
-      .rpc(confirmOptions);
+    const ixWithRemaining = {
+      ...ix,
+      accounts: [...ix.accounts, ...remainingAccounts],
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return sendInstruction(this.rpc, ixWithRemaining as any, this.signer);
   }
 
-  /**
-   * Commit matched tickets back to L1 (runs in TEE)
-   */
   async commitTickets(
-    tenant: web3.PublicKey,
-    ticketPdas: web3.PublicKey[],
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    return await this.program.methods
-      .commitTickets()
-      .accountsPartial({
-        tenant: tenant,
-        payer: this.provider.publicKey,
-      })
-      .remainingAccounts(
-        ticketPdas.map(pda => ({
-          pubkey: pda,
-          isSigner: false,
-          isWritable: true,
-        }))
-      )
-      .signers(signers)
-      .rpc(confirmOptions);
+    tenant: Address,
+    ticketPdas: Address[],
+  ): Promise<string> {
+    const ix = getCommitTicketsInstruction({
+      tenant,
+      payer: this.signer,
+    }, { programAddress: this.programId });
+
+    const ixWithRemaining = {
+      ...ix,
+      accounts: [
+        ...ix.accounts,
+        ...ticketPdas.map((address) => ({ address, role: 1 as const })),
+      ],
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return sendInstruction(this.rpc, ixWithRemaining as any, this.signer);
+  }
+
+  /** Create a new MatchmakingAdmin pointing at a TEE RPC endpoint. */
+  withRpc(teeUrl: string): MatchmakingAdmin {
+    return new MatchmakingAdmin(createSolanaRpc(teeUrl), this.signer, this.programId);
   }
 }

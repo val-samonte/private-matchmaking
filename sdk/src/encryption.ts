@@ -1,6 +1,3 @@
-import { PublicKey } from "@solana/web3.js";
-// import { x25519 } from "@noble/curves/ed25519"; 
-
 export class EncryptionProvider {
     private keyPair: CryptoKeyPair | null = null;
     

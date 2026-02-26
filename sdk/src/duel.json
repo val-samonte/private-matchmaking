@@ -759,8 +759,7 @@
           "name": "tenant"
         },
         {
-          "name": "player_data",
-          "writable": true
+          "name": "player_data"
         },
         {
           "name": "player_ticket",
@@ -832,6 +831,71 @@
           }
         }
       ]
+    },
+    {
+      "name": "setup_ticket_permission",
+      "docs": [
+        "Set up permission for ticket PDA so queueAuthority can write it on TEE.",
+        "Must be called BEFORE delegate_ticket while the program still owns the PDA."
+      ],
+      "discriminator": [
+        164,
+        29,
+        7,
+        235,
+        183,
+        223,
+        11,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "ticket",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "account",
+                "path": "tenant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tenant"
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [

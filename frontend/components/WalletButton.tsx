@@ -10,11 +10,10 @@ export function WalletButton() {
   const [showModal, setShowModal] = useState(false);
 
   if (connected && publicKey) {
-    const addr = publicKey.toBase58();
     return (
       <div className="flex items-center gap-2">
         <span className="text-sm text-foreground-muted">
-          {addr.slice(0, 4)}...{addr.slice(-4)}
+          {publicKey.slice(0, 4)}...{publicKey.slice(-4)}
         </span>
         <button
           onClick={ctxDisconnect}

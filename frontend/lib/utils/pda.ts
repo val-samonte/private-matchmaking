@@ -1,5 +1,9 @@
-import { PublicKey } from "@solana/web3.js";
-import BN from "bn.js";
+import {
+  getProgramDerivedAddress,
+  getAddressEncoder,
+  getUtf8Encoder,
+  type Address,
+} from "@solana/kit";
 import {
   RPS_GAME_PROGRAM_ID,
   DUEL_PROGRAM_ID,
@@ -10,75 +14,89 @@ import {
   TICKET_SEED,
 } from "../constants";
 
+const addressEncoder = getAddressEncoder();
+const utf8Encoder = getUtf8Encoder();
+
 /**
  * Derive Player Profile PDA
  */
-export function derivePlayerProfilePda(
-  player: PublicKey,
-  programId: PublicKey = RPS_GAME_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(PLAYER_PROFILE_SEED), player.toBuffer()],
-    programId
-  );
+export async function derivePlayerProfilePda(
+  player: Address,
+  programId: Address = RPS_GAME_PROGRAM_ID
+) {
+  return getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [utf8Encoder.encode(PLAYER_PROFILE_SEED), addressEncoder.encode(player)],
+  });
 }
 
 /**
  * Derive Game Session PDA
  */
-export function deriveGameSessionPda(
-  player1: PublicKey,
-  player2: PublicKey,
-  gameId: BN,
-  programId: PublicKey = RPS_GAME_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(GAME_SESSION_SEED),
-      player1.toBuffer(),
-      player2.toBuffer(),
-      gameId.toArrayLike(Buffer, "le", 8),
+export async function deriveGameSessionPda(
+  player1: Address,
+  player2: Address,
+  gameId: bigint,
+  programId: Address = RPS_GAME_PROGRAM_ID
+) {
+  // gameId as little-endian u64 (8 bytes)
+  const gameIdBytes = new Uint8Array(8);
+  let n = gameId;
+  for (let i = 0; i < 8; i++) {
+    gameIdBytes[i] = Number(n & BigInt(0xff));
+    n >>= BigInt(8);
+  }
+  return getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [
+      utf8Encoder.encode(GAME_SESSION_SEED),
+      addressEncoder.encode(player1),
+      addressEncoder.encode(player2),
+      gameIdBytes,
     ],
-    programId
-  );
+  });
 }
 
 /**
  * Derive Queue PDA
  */
-export function deriveQueuePda(
-  authority: PublicKey,
-  programId: PublicKey = DUEL_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(QUEUE_SEED), authority.toBuffer()],
-    programId
-  );
+export async function deriveQueuePda(
+  authority: Address,
+  programId: Address = DUEL_PROGRAM_ID
+) {
+  return getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [utf8Encoder.encode(QUEUE_SEED), addressEncoder.encode(authority)],
+  });
 }
 
 /**
  * Derive Tenant PDA
  */
-export function deriveTenantPda(
-  authority: PublicKey,
-  programId: PublicKey = DUEL_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(TENANT_SEED), authority.toBuffer()],
-    programId
-  );
+export async function deriveTenantPda(
+  authority: Address,
+  programId: Address = DUEL_PROGRAM_ID
+) {
+  return getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [utf8Encoder.encode(TENANT_SEED), addressEncoder.encode(authority)],
+  });
 }
 
 /**
  * Derive MatchTicket PDA
  */
-export function deriveTicketPda(
-  player: PublicKey,
-  tenant: PublicKey,
-  programId: PublicKey = DUEL_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(TICKET_SEED), player.toBuffer(), tenant.toBuffer()],
-    programId
-  );
+export async function deriveTicketPda(
+  player: Address,
+  tenant: Address,
+  programId: Address = DUEL_PROGRAM_ID
+) {
+  return getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [
+      utf8Encoder.encode(TICKET_SEED),
+      addressEncoder.encode(player),
+      addressEncoder.encode(tenant),
+    ],
+  });
 }

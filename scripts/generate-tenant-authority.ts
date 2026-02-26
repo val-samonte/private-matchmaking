@@ -1,80 +1,66 @@
-import { Keypair } from "@solana/web3.js";
-import * as fs from "fs";
-import * as path from "path";
-import bs58 from "bs58";
+import { generateKeyPairSigner, getBase58Decoder } from "@solana/kit";
+import { writeFileSync, readFileSync, existsSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
-/**
- * Generate a dedicated tenant authority keypair
- * This keypair will be used for:
- * 1. Tenant authority (queue management)
- * 2. TEE authentication (shared session for all players)
- */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 async function main() {
   console.log("Generating Dedicated Tenant Authority Keypair...");
   console.log("");
 
-  // Generate new keypair
-  const tenantAuthority = Keypair.generate();
-  
-  console.log("✅ Keypair generated");
-  console.log("   Public Key:", tenantAuthority.publicKey.toBase58());
+  const tenantAuthority = await generateKeyPairSigner();
+
+  // Export raw key bytes for Solana CLI keypair format (64 bytes: seed + pubkey)
+  const privKeyPkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", tenantAuthority.keyPair.privateKey)
+  );
+  const pubKeyRaw = new Uint8Array(
+    await crypto.subtle.exportKey("raw", tenantAuthority.keyPair.publicKey)
+  );
+  // Ed25519 PKCS8: last 32 bytes are the seed
+  const seed32 = privKeyPkcs8.slice(-32);
+  const keypairBytes = new Uint8Array(64);
+  keypairBytes.set(seed32);
+  keypairBytes.set(pubKeyRaw, 32);
+
+  const address = tenantAuthority.address;
+  const privateKeyBase58 = getBase58Decoder().decode(keypairBytes);
+
+  console.log("Keypair generated");
+  console.log("  Public Key:", address);
   console.log("");
 
-  // Encode private key as base58
-  const privateKeyBase58 = bs58.encode(tenantAuthority.secretKey);
-  
-  // Save to frontend .env.local
-  const envPath = path.join(__dirname, "../frontend/.env.local");
-  let envContent = "";
-  
-  if (fs.existsSync(envPath)) {
-    envContent = fs.readFileSync(envPath, "utf-8");
-  }
+  // Save keypair JSON (Solana CLI format) for init-queue
+  const keypairPath = join(__dirname, "../.tenant-authority.json");
+  writeFileSync(keypairPath, JSON.stringify(Array.from(keypairBytes)));
+  console.log("Keypair saved to .tenant-authority.json");
 
-  // Update environment variables
-  const updates = [
-    { key: "TENANT_AUTHORITY_PRIVATE_KEY", value: privateKeyBase58 },
-    { key: "NEXT_PUBLIC_QUEUE_AUTHORITY", value: tenantAuthority.publicKey.toBase58() },
+  // Update frontend/.env.local
+  const envPath = join(__dirname, "../frontend/.env.local");
+  let envContent = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
+
+  const updates: [string, string][] = [
+    ["TENANT_AUTHORITY_PRIVATE_KEY", privateKeyBase58 as string],
+    ["NEXT_PUBLIC_QUEUE_AUTHORITY", address],
   ];
 
-  for (const { key, value } of updates) {
+  for (const [key, value] of updates) {
     const line = `${key}=${value}`;
-    
     if (envContent.includes(`${key}=`)) {
       envContent = envContent.replace(new RegExp(`${key}=.*`), line);
     } else {
       envContent += `\n${line}\n`;
     }
   }
+  writeFileSync(envPath, envContent);
+  console.log("Configuration saved to frontend/.env.local");
 
-  fs.writeFileSync(envPath, envContent);
-  
-  console.log("✅ Configuration saved to frontend/.env.local");
   console.log("");
-  console.log("⚠️  NEXT STEPS:");
-  console.log("   1. Fund the tenant authority with SOL:");
-  console.log(`      solana airdrop 2 ${tenantAuthority.publicKey.toBase58()} --url devnet`);
-  console.log("");
-  console.log("   2. Initialize the queue with this authority:");
-  console.log("      TENANT_AUTHORITY_KEY=<private_key> anchor run init-queue");
-  console.log("");
-  console.log("   3. Restart your dev server:");
-  console.log("      cd frontend && npm run dev -- --webpack");
-  console.log("");
-  
-  // Save keypair to a temporary file for init-queue to use
-  const keypairPath = path.join(__dirname, "../.tenant-authority.json");
-  fs.writeFileSync(
-    keypairPath,
-    JSON.stringify(Array.from(tenantAuthority.secretKey))
-  );
-  
-  console.log("✅ Keypair saved to .tenant-authority.json (temporary, for init-queue)");
-  console.log("");
-  console.log("🔒 SECURITY:");
-  console.log("   - .tenant-authority.json is gitignored");
-  console.log("   - Private key is only in .env.local (server-side)");
-  console.log("   - Delete .tenant-authority.json after running init-queue");
+  console.log("NEXT STEPS:");
+  console.log(`  1. Fund: solana airdrop 2 ${address} --url devnet`);
+  console.log("  2. Init:  npx tsx scripts/init-queue.ts");
+  console.log("  3. Delete .tenant-authority.json after init");
 }
 
 main().then(

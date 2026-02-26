@@ -1,136 +1,91 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { Duel } from "../target/types/duel";
-import { RpsGame } from "../target/types/rps_game";
-import { PublicKey, Keypair } from "@solana/web3.js";
-import { MatchmakingAdmin } from "../sdk/src";
-import * as fs from "fs";
-import * as path from "path";
+import {
+  createSolanaRpc,
+  createKeyPairSignerFromBytes,
+  type Address,
+} from "@solana/kit";
+import { MatchmakingAdmin, fetchMaybeTenant, fetchMaybeQueue, utils } from "../sdk/src/index.js";
 
-/**
- * Initialize the matchmaking queue and tenant for the RPS game
- * This must be run ONCE before players can join the queue
- */
+const { deriveQueuePda, deriveTenantPda } = utils;
+import { readFileSync, existsSync } from "fs";
+import { homedir } from "os";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
+const RPS_GAME_PROGRAM_ID = "8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos" as Address;
+const ER_VALIDATOR = "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA" as Address;
+const L1_RPC_URL = "https://api.devnet.solana.com";
+
 async function main() {
-  const provider = anchor.AnchorProvider.env();
-  anchor.setProvider(provider);
+  const rpc = createSolanaRpc(L1_RPC_URL);
 
-  const duelProgram = anchor.workspace.Duel as Program<Duel>;
-  const rpsProgram = anchor.workspace.RpsGame as Program<RpsGame>;
+  // Load signer: prefer dedicated tenant authority, fall back to Solana default wallet
+  const tenantKeypairPath = join(__dirname, "../.tenant-authority.json");
+  const walletPath = tenantKeypairPath && existsSync(tenantKeypairPath)
+    ? tenantKeypairPath
+    : `${homedir()}/.config/solana/id.json`;
+
+  const keypairBytes = new Uint8Array(JSON.parse(readFileSync(walletPath, "utf-8")));
+  const signer = await createKeyPairSignerFromBytes(keypairBytes);
 
   console.log("Initializing Matchmaking Infrastructure...");
+  console.log("Signer:", signer.address);
   console.log("");
 
-  // Check if tenant authority keypair file exists
-  const tenantKeypairPath = path.join(__dirname, "../.tenant-authority.json");
-  let wallet: Keypair;
-  let queueAuthority: PublicKey;
-  
-  if (fs.existsSync(tenantKeypairPath)) {
-    // Use dedicated tenant authority
-    const keypairData = JSON.parse(fs.readFileSync(tenantKeypairPath, "utf-8"));
-    wallet = Keypair.fromSecretKey(new Uint8Array(keypairData));
-    queueAuthority = wallet.publicKey;
-    console.log("Using dedicated tenant authority keypair");
-  } else {
-    // Use wallet from provider (your personal wallet)
-    wallet = (provider.wallet as anchor.Wallet).payer;
-    queueAuthority = wallet.publicKey;
-    console.log("Using wallet as tenant authority");
-  }
-  
-  
-  const [queuePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("queue"), queueAuthority.toBuffer()],
-    duelProgram.programId
-  );
+  const queueAuthority = signer.address;
+  const tenantPda = await deriveTenantPda(DUEL_PROGRAM_ID, queueAuthority);
+  const queuePda = await deriveQueuePda(DUEL_PROGRAM_ID, queueAuthority);
 
-  const [tenantPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("tenant"), queueAuthority.toBuffer()],
-    duelProgram.programId
-  );
-
-  console.log("Queue Authority (Wallet):", queueAuthority.toBase58());
-  console.log("RPS Program ID:", rpsProgram.programId.toBase58());
-  console.log("Queue PDA:", queuePda.toBase58());
-  console.log("Tenant PDA:", tenantPda.toBase58());
+  console.log("Queue Authority:", queueAuthority);
+  console.log("Tenant PDA:", tenantPda);
+  console.log("Queue PDA:", queuePda);
   console.log("");
 
   // Check if already initialized
-  try {
-    await duelProgram.account.tenant.fetch(tenantPda);
-    console.log("✅ Tenant already exists - skipping initialization");
-    
-    const queue = await duelProgram.account.queue.fetch(queuePda);
-    console.log("✅ Queue already exists - skipping initialization");
-    console.log("   Current queue entries:", queue.entries.length);
+  const maybeTenant = await fetchMaybeTenant(rpc, tenantPda);
+  if (maybeTenant.exists) {
+    const maybeQueue = await fetchMaybeQueue(rpc, queuePda);
+    console.log("Tenant already exists - skipping initialization");
+    if (maybeQueue.exists) {
+      console.log("Queue already exists - skipping initialization");
+      console.log("  Current queue entries:", maybeQueue.data.entries.length);
+    }
     console.log("");
     console.log("Matchmaking infrastructure is ready!");
     return;
-  } catch (err) {
-    // Not initialized yet - continue
-    console.log("Initializing new matchmaking infrastructure...");
   }
 
-  // Initialize using SDK
-  const mmAdmin = new MatchmakingAdmin(provider, duelProgram.programId);
+  const mmAdmin = new MatchmakingAdmin(rpc, signer, DUEL_PROGRAM_ID);
 
   // 1. Initialize Tenant
   console.log("1. Initializing Tenant...");
-  try {
-    await mmAdmin.initializeTenant(
-      rpsProgram.programId, // tenant program ID (RPS game)
-      {
-        authority: queueAuthority,
-        eloWindow: 100, // Match players within 100 ELO points
-        eloOffset: 8 + 32, // Offset to ELO field in PlayerProfile (discriminator + player pubkey)
-        eloDataType: 'u64' // ELO is stored as u64
-      },
-      undefined, // confirmOptions
-      [wallet] // signers - pass the wallet keypair
-    );
-    console.log("   ✅ Tenant initialized");
-  } catch (err: any) {
-    console.error("   ❌ Failed to initialize tenant:", err.message);
-    throw err;
-  }
+  const hashBytes = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode("global:on_match_found"))
+  );
+  const callbackDiscriminator = Array.from(hashBytes.slice(0, 8));
+  await mmAdmin.initializeTenant(RPS_GAME_PROGRAM_ID, {
+    eloWindow: 100n,
+    eloOffset: 8 + 32,
+    eloDataType: "u64",
+    callbackProgramId: RPS_GAME_PROGRAM_ID,
+    callbackDiscriminator,
+  });
+  console.log("   Tenant initialized");
 
   // 2. Initialize Queue
   console.log("2. Initializing Queue...");
-  try {
-    await mmAdmin.initializeQueue(
-      queueAuthority,
-      tenantPda,
-      undefined, // confirmOptions
-      [wallet] // signers
-    );
-    console.log("   ✅ Queue initialized");
-  } catch (err: any) {
-    console.error("   ❌ Failed to initialize queue:", err.message);
-    throw err;
-  }
+  await mmAdmin.initializeQueue(queueAuthority, tenantPda);
+  console.log("   Queue initialized");
 
-  // 3. Delegate Queue to TEE (for privacy)
+  // 3. Delegate Queue to TEE
   console.log("3. Delegating Queue to TEE...");
-  const ER_VALIDATOR = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
-  
-  try {
-    await mmAdmin.delegateQueue(
-      queueAuthority,
-      ER_VALIDATOR,
-      undefined, // confirmOptions
-      [wallet] // signers
-    );
-    console.log("   ✅ Queue delegated to TEE");
-  } catch (err: any) {
-    console.error("   ❌ Failed to delegate queue:", err.message);
-    throw err;
-  }
+  await mmAdmin.delegateQueue(queueAuthority, ER_VALIDATOR);
+  console.log("   Queue delegated to TEE");
 
   console.log("");
-  console.log("🎉 Matchmaking infrastructure initialized successfully!");
-  console.log("");
-  console.log("Players can now join the queue via the frontend.");
+  console.log("Matchmaking infrastructure initialized successfully!");
 }
 
 main().then(

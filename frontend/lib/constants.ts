@@ -1,15 +1,15 @@
-import { PublicKey } from "@solana/web3.js";
+import { address, type Address } from "@solana/kit";
 
 // Program IDs
-export const RPS_GAME_PROGRAM_ID = new PublicKey(
+export const RPS_GAME_PROGRAM_ID: Address = address(
   process.env.NEXT_PUBLIC_RPS_PROGRAM_ID || "8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos"
 );
 
-export const DUEL_PROGRAM_ID = new PublicKey(
+export const DUEL_PROGRAM_ID: Address = address(
   process.env.NEXT_PUBLIC_DUEL_PROGRAM_ID || "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X"
 );
 
-export const ER_VALIDATOR = new PublicKey(
+export const ER_VALIDATOR: Address = address(
   process.env.NEXT_PUBLIC_ER_VALIDATOR || "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"
 );
 
@@ -35,6 +35,9 @@ export const RPC_ENDPOINTS = {
 
 // Queue Authority (the wallet that initialized the queue)
 // This must match the authority used when running `anchor run init-queue`
-export const QUEUE_AUTHORITY = new PublicKey(
+export const QUEUE_AUTHORITY: Address = address(
   process.env.NEXT_PUBLIC_QUEUE_AUTHORITY || "Fh68kkXwFDubEdkRRBuWCXBdTr2YtnM52ASA7fxHrbCw"
 );
+
+// Delegation program
+export const DELEGATION_PROGRAM_ID: Address = address("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");

@@ -1,19 +1,21 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { useSetAtom } from "jotai";
 import type { UiWallet, UiWalletAccount } from "@wallet-standard/ui";
-import { PublicKey } from "@solana/web3.js";
+import type { Address } from "@solana/kit";
 import {
   createWalletBridge,
-  type AnchorCompatWallet,
+  type KitWallet,
 } from "@/lib/utils/wallet-bridge";
+import { walletAtom } from "@/lib/atoms/wallet";
 
 interface WalletContextType {
   wallet: UiWallet | null;
   account: UiWalletAccount | null;
-  publicKey: PublicKey | null;
+  publicKey: Address | null;
   connected: boolean;
-  anchorWallet: AnchorCompatWallet | null;
+  kitWallet: KitWallet | null;
   connect: (wallet: UiWallet, account: UiWalletAccount) => void;
   disconnect: () => void;
 }
@@ -23,7 +25,7 @@ const WalletContext = createContext<WalletContextType>({
   account: null,
   publicKey: null,
   connected: false,
-  anchorWallet: null,
+  kitWallet: null,
   connect: () => {},
   disconnect: () => {},
 });
@@ -35,26 +37,30 @@ export function useWalletContext() {
 export function WalletContextProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<UiWallet | null>(null);
   const [account, setAccount] = useState<UiWalletAccount | null>(null);
-  const [anchorWallet, setAnchorWallet] = useState<AnchorCompatWallet | null>(null);
-  const [publicKey, setPublicKey] = useState<PublicKey | null>(null);
+  const [kitWallet, setKitWallet] = useState<KitWallet | null>(null);
+  const [publicKey, setPublicKey] = useState<Address | null>(null);
+  const setWalletAtom = useSetAtom(walletAtom);
 
   const connect = useCallback((w: UiWallet, a: UiWalletAccount) => {
+    const addr = a.address as Address;
     setWallet(w);
     setAccount(a);
-    setPublicKey(new PublicKey(a.address));
-    setAnchorWallet(createWalletBridge(w, a));
-  }, []);
+    setPublicKey(addr);
+    setWalletAtom(addr);
+    setKitWallet(createWalletBridge(w, a));
+  }, [setWalletAtom]);
 
   const disconnect = useCallback(() => {
     setWallet(null);
     setAccount(null);
     setPublicKey(null);
-    setAnchorWallet(null);
-  }, []);
+    setWalletAtom(null);
+    setKitWallet(null);
+  }, [setWalletAtom]);
 
   return (
     <WalletContext.Provider
-      value={{ wallet, account, publicKey, connected: !!account, anchorWallet, connect, disconnect }}
+      value={{ wallet, account, publicKey, connected: !!account, kitWallet, connect, disconnect }}
     >
       {children}
     </WalletContext.Provider>

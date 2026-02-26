@@ -1,16 +1,16 @@
 import { atom } from "jotai";
-import { PublicKey } from "@solana/web3.js";
+import type { Address } from "@solana/kit";
 import { walletAtom } from "./wallet";
 import { derivePlayerProfilePda } from "../utils/pda";
-import { PlayerProfile } from "../types/rps";
+import type { PlayerProfile } from "../types/rps";
 
 /**
- * Player Profile PDA atom (derived from wallet)
+ * Player Profile PDA atom (async — derived from wallet)
  */
-export const playerProfilePdaAtom = atom((get) => {
+export const playerProfilePdaAtom = atom(async (get): Promise<Address | null> => {
   const wallet = get(walletAtom);
   if (!wallet) return null;
-  const [pda] = derivePlayerProfilePda(wallet);
+  const [pda] = await derivePlayerProfilePda(wallet);
   return pda;
 });
 

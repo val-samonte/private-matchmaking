@@ -3,25 +3,42 @@
 import { useCallback, useState, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
-import { connectionAtom } from "@/lib/atoms/program";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { MatchmakingPlayer, MatchmakingAdmin } from "@1upmonster/duel";
+import { rpcAtom } from "@/lib/atoms/program";
 import { useWalletContext } from "@/lib/contexts/WalletContext";
-import { getTeeAuthToken, createTeeProvider, waitForDelegation, createL1Provider } from "@/lib/utils/tee";
-import { deriveQueuePda, deriveTenantPda } from "@/lib/utils/pda";
-import { deriveTicketPda } from "@/lib/utils/pda";
+import { getTeeAuthToken, waitForDelegation } from "@/lib/utils/tee";
+import { walletToSigner } from "@/lib/utils/wallet-bridge";
+import { sendInstruction, sendInstructions } from "@/lib/utils/transaction";
+import { deriveQueuePda, deriveTenantPda, deriveTicketPda } from "@/lib/utils/pda";
 import {
   DUEL_PROGRAM_ID,
-  RPS_GAME_PROGRAM_ID,
   QUEUE_AUTHORITY,
   TEE_RPC_URL,
   TEE_WS_URL,
   ER_VALIDATOR,
-  RPC_ENDPOINTS,
-  SOLANA_NETWORK,
+  DELEGATION_PROGRAM_ID,
 } from "@/lib/constants";
+import {
+  getCreateTicketInstructionAsync,
+  getDelegateTicketInstructionAsync,
+  getJoinQueueInstructionAsync,
+  getFlushMatchesInstruction,
+  getCommitTicketsInstruction,
+  getCancelTicketInstructionAsync,
+  getCloseTicketInstructionAsync,
+  fetchMaybeMatchTicket,
+  fetchQueue,
+} from "@sdk/generated/duel";
+import { accountType } from "@sdk/generated/duel/types";
+import { createSolanaRpc } from "@solana/kit";
 
-type MatchmakingState = "idle" | "creating_ticket" | "delegating" | "joining" | "searching" | "matched" | "error";
+type MatchmakingState =
+  | "idle"
+  | "creating_ticket"
+  | "delegating"
+  | "joining"
+  | "searching"
+  | "matched"
+  | "error";
 
 type MatchResult = {
   opponent: string;
@@ -30,17 +47,17 @@ type MatchResult = {
 };
 
 export function useMatchmaking() {
-  const { publicKey, anchorWallet } = useWalletContext();
+  const { publicKey, kitWallet } = useWalletContext();
   const profilePda = useAtomValue(playerProfilePdaAtom);
+  const rpc = useAtomValue(rpcAtom);
 
   const [state, setState] = useState<MatchmakingState>("idle");
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const subscriptionRef = useRef<number | null>(null);
 
   const findMatch = useCallback(async () => {
-    if (!publicKey || !profilePda || !anchorWallet) {
+    if (!publicKey || !profilePda || !kitWallet) {
       throw new Error("Wallet not connected or profile not found");
     }
 
@@ -49,211 +66,204 @@ export function useMatchmaking() {
 
     try {
       setError(null);
+      const signer = walletToSigner(kitWallet);
 
       // Derive PDAs
-      const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
-      const [queuePda] = deriveQueuePda(QUEUE_AUTHORITY);
+      const [tenantPda] = await deriveTenantPda(QUEUE_AUTHORITY);
+      const [queuePda] = await deriveQueuePda(QUEUE_AUTHORITY);
+      const [ticketPda] = await deriveTicketPda(publicKey, tenantPda, DUEL_PROGRAM_ID);
 
-      // Create L1 provider + SDK player
-      const l1Connection = new Connection(
-        RPC_ENDPOINTS[SOLANA_NETWORK as keyof typeof RPC_ENDPOINTS] || RPC_ENDPOINTS.devnet,
-        "confirmed"
-      );
-      const l1Provider = createL1Provider(l1Connection, anchorWallet);
-      const l1Player = new MatchmakingPlayer(l1Provider, DUEL_PROGRAM_ID);
-
-      // Get ticket PDA from SDK
-      const ticketPda = l1Player.getTicketPda(publicKey, tenantPda);
-
-      // 1. Clean up any stale ticket, then create a fresh MatchTicket
+      // 1. Clean up any stale ticket
       setState("creating_ticket");
-      const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
-      const existingTicket = await l1Connection.getAccountInfo(ticketPda);
+      const existingTicketRes = await rpc.getAccountInfo(ticketPda, { encoding: "base64" }).send();
+      const existingTicket = existingTicketRes.value;
 
       if (existingTicket) {
-        if (existingTicket.owner.equals(DELEGATION_PROGRAM_ID)) {
-          // Ticket is still delegated to TEE — cancel on TEE, commit back, then close
+        if (existingTicket.owner === DELEGATION_PROGRAM_ID) {
+          // Ticket is delegated to TEE — cancel on TEE then commit back
           console.log("Stale ticket is delegated — cleaning up via TEE…");
-          const { token: cleanupToken } = await getTeeAuthToken(TEE_RPC_URL, anchorWallet);
-          const cleanupTeeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, cleanupToken, anchorWallet);
-          const teePlayer = new MatchmakingPlayer(cleanupTeeProvider, DUEL_PROGRAM_ID);
-          const teeAdmin = new MatchmakingAdmin(cleanupTeeProvider, DUEL_PROGRAM_ID);
+          const { token: cleanupToken } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
+          const cleanupTeeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${cleanupToken}`);
 
-          try { await teePlayer.cancelTicket(tenantPda); } catch (e: any) {
-            console.warn("cancelTicket on TEE failed (may already be cancelled):", e.message);
+          try {
+            const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
+            await sendInstruction(cleanupTeeRpc, cancelIx, kitWallet);
+          } catch (e: any) {
+            console.warn("cancelTicket on TEE failed:", e.message);
           }
-          try { await teeAdmin.commitTickets(tenantPda, [ticketPda]); } catch (e: any) {
+
+          // Commit tickets to return to L1 - passing ticket PDAs as remaining accounts
+          try {
+            const commitIx = getCommitTicketsInstruction({ tenant: tenantPda, payer: signer });
+            // Add ticket as remaining account (writable)
+            const commitIxWithRemaining = {
+              ...commitIx,
+              accounts: [
+                ...commitIx.accounts,
+                { address: ticketPda, role: 3 /* WRITABLE */ },
+              ],
+            };
+            await sendInstruction(cleanupTeeRpc, commitIxWithRemaining as any, kitWallet);
+          } catch (e: any) {
             console.warn("commitTickets on TEE failed:", e.message);
           }
 
           // Wait for L1 to see the undelegated ticket
           console.log("Waiting for ticket to return to L1…");
           for (let i = 0; i < 30; i++) {
-            await new Promise(r => setTimeout(r, 2000));
-            const info = await l1Connection.getAccountInfo(ticketPda);
-            if (!info || !info.owner.equals(DELEGATION_PROGRAM_ID)) break;
+            await new Promise((r) => setTimeout(r, 2000));
+            const info = await rpc.getAccountInfo(ticketPda, { encoding: "base64" }).send();
+            if (!info.value || info.value.owner !== DELEGATION_PROGRAM_ID) break;
           }
         }
 
-        // Ticket should now be on L1 (or closed) — close it if still present
-        const ticketAfterCommit = await l1Connection.getAccountInfo(ticketPda);
-        if (ticketAfterCommit && !ticketAfterCommit.owner.equals(DELEGATION_PROGRAM_ID)) {
+        // Close the stale ticket if it's back on L1
+        const ticketAfterCommit = await rpc.getAccountInfo(ticketPda, { encoding: "base64" }).send();
+        if (ticketAfterCommit.value && ticketAfterCommit.value.owner !== DELEGATION_PROGRAM_ID) {
           console.log("Closing stale ticket on L1…");
-          await l1Player.closeTicket(tenantPda);
+          try {
+            const closeIx = await getCloseTicketInstructionAsync({ player: signer, tenant: tenantPda });
+            await sendInstruction(rpc, closeIx, kitWallet);
+          } catch (e: any) {
+            console.warn("closeTicket failed:", e.message);
+          }
         }
       }
 
+      if (signal.aborted) throw new Error("Search cancelled");
+
+      // 2. Create fresh MatchTicket on L1
       console.log("Creating MatchTicket on L1...");
-      await l1Player.createTicket(tenantPda);
-      console.log("Ticket created:", ticketPda.toBase58());
+      const createIx = await getCreateTicketInstructionAsync({ player: signer, tenant: tenantPda });
+      await sendInstruction(rpc, createIx, kitWallet);
+      console.log("Ticket created:", ticketPda);
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 2. Delegate ticket to TEE
+      // 3. Delegate ticket to TEE
       setState("delegating");
       console.log("Delegating ticket to TEE...");
-      await l1Player.delegateTicket(publicKey, tenantPda, ER_VALIDATOR);
+      const delegateIx = await getDelegateTicketInstructionAsync({
+        pda: ticketPda,
+        payer: signer,
+        validator: ER_VALIDATOR,
+        accountType: accountType("Ticket", { player: publicKey, tenant: tenantPda }),
+      });
+      await sendInstruction(rpc, delegateIx, kitWallet);
 
-      // 3. Get TEE auth token
+      // 4. Get TEE auth token and wait for activation
       console.log("Authenticating with TEE...");
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, anchorWallet);
+      const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
 
-      // Wait for delegation to activate
       console.log("Waiting for ticket TEE activation...");
       await waitForDelegation(TEE_RPC_URL, token, ticketPda);
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 4. Join queue via TEE directly
+      // 5. Join queue via TEE
       setState("joining");
       console.log("Joining queue via TEE...");
-      const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, anchorWallet);
-      const teePlayer = new MatchmakingPlayer(teeProvider, DUEL_PROGRAM_ID);
+      const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
 
-      await teePlayer.joinQueue(queuePda, tenantPda, profilePda);
+      const joinIx = await getJoinQueueInstructionAsync({
+        queue: queuePda,
+        tenant: tenantPda,
+        playerData: profilePda,
+        signer,
+      });
+      await sendInstruction(teeRpc, joinIx, kitWallet);
       console.log("Joined queue via TEE");
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 5. Flush pending matches + commit tickets (crank duty)
-      //    After joinQueue, if we caused a match, the queue has PendingMatch
-      //    entries for the opponent. We flush them and commit all tickets to L1.
-      const teeAdmin = new MatchmakingAdmin(teeProvider, DUEL_PROGRAM_ID);
+      // 6. Flush pending matches + commit tickets (crank duty)
       try {
-        const queueData = await teeAdmin.getQueue(queuePda);
-        const pendingMatches = queueData.pendingMatches || [];
+        const queueAccount = await fetchQueue(teeRpc, queuePda);
+        const pendingMatches = queueAccount.data.pendingMatches;
         console.log("Pending matches in queue:", pendingMatches.length);
 
         if (pendingMatches.length > 0) {
-          // Derive opponent ticket PDAs from pending matches
-          const opponentTicketPdas = pendingMatches.map((pm: any) =>
-            deriveTicketPda(pm.player, tenantPda, DUEL_PROGRAM_ID)[0]
+          const opponentTicketPdas = await Promise.all(
+            pendingMatches.map(async (pm) => {
+              const [oppTicket] = await deriveTicketPda(pm.player, tenantPda, DUEL_PROGRAM_ID);
+              return oppTicket;
+            })
           );
-
-          // Check if tenant has callback configured
-          const tenantData = await teeAdmin.getTenant(tenantPda);
-          const callbackProgram = tenantData.callbackProgramId || undefined;
 
           console.log("Flushing pending matches...");
-          await teeAdmin.flushMatches(
-            queuePda,
-            tenantPda,
-            opponentTicketPdas,
-            callbackProgram,
-          );
+          const flushIx = getFlushMatchesInstruction({ queue: queuePda, tenant: tenantPda, signer });
+          // Add opponent tickets as remaining accounts (writable)
+          const flushIxWithRemaining = {
+            ...flushIx,
+            accounts: [
+              ...flushIx.accounts,
+              ...opponentTicketPdas.map((addr) => ({ address: addr, role: 3 })),
+            ],
+          };
+          await sendInstruction(teeRpc, flushIxWithRemaining as any, kitWallet);
           console.log("Pending matches flushed");
 
-          // Commit all matched tickets (ours + opponents) back to L1
+          // Commit all matched tickets back to L1
           const allTickets = [ticketPda, ...opponentTicketPdas];
-          console.log("Committing tickets to L1...", allTickets.map(t => t.toBase58()));
-          await teeAdmin.commitTickets(tenantPda, allTickets);
+          console.log("Committing tickets to L1...", allTickets);
+          const commitIx = getCommitTicketsInstruction({ tenant: tenantPda, payer: signer });
+          const commitIxWithRemaining = {
+            ...commitIx,
+            accounts: [
+              ...commitIx.accounts,
+              ...allTickets.map((addr) => ({ address: addr, role: 3 })),
+            ],
+          };
+          await sendInstruction(teeRpc, commitIxWithRemaining as any, kitWallet);
           console.log("Tickets committed to L1");
         } else {
-          // We're the first player — no match yet, just wait
           console.log("No pending matches — waiting for opponent to join and flush");
         }
       } catch (flushErr: any) {
-        // Non-fatal: the other player may handle flush+commit
         console.warn("Flush/commit failed (other player may handle it):", flushErr.message);
       }
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 6. Subscribe to ticket PDA on L1 via onAccountChange
+      // 7. Poll L1 for match (watching ticket PDA)
       setState("searching");
       console.log("Waiting for match (watching L1 ticket)...");
 
-      const match = await new Promise<MatchResult | null>((resolve, reject) => {
+      const match = await new Promise<MatchResult | null>((resolve) => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
         let pollId: ReturnType<typeof setInterval> | null = null;
 
         const cleanup = () => {
           if (timeoutId) clearTimeout(timeoutId);
           if (pollId) clearInterval(pollId);
-          if (subscriptionRef.current !== null) {
-            l1Connection.removeAccountChangeListener(subscriptionRef.current);
-            subscriptionRef.current = null;
-          }
         };
 
-        // Listen for abort
-        signal.addEventListener("abort", () => {
-          cleanup();
-          resolve(null);
-        });
+        signal.addEventListener("abort", () => { cleanup(); resolve(null); });
 
-        // Timeout after 2 minutes
-        timeoutId = setTimeout(() => {
-          cleanup();
-          resolve(null);
-        }, 120000);
+        // 2-minute timeout
+        timeoutId = setTimeout(() => { cleanup(); resolve(null); }, 120000);
 
-        const tryDecode = (accountInfo: { data: Buffer }) => {
+        const checkTicket = async () => {
           try {
-            const decoded = l1Player.program.coder.accounts.decode(
-              "matchTicket",
-              accountInfo.data
-            );
-            if (decoded.status?.matched) {
+            const maybeTicket = await fetchMaybeMatchTicket(rpc, ticketPda);
+            if (!maybeTicket.exists) return;
+            const status = maybeTicket.data.status;
+            if (status.__kind === "Matched") {
               cleanup();
-              const opponentKey = decoded.status.matched.opponent;
-              const opponentStr = opponentKey.toBase58();
-              const myKey = publicKey.toBuffer();
-              const oppKey = new PublicKey(opponentStr).toBuffer();
-              const role = Buffer.compare(myKey, oppKey) < 0 ? "player1" : "player2";
-              resolve({
-                opponent: opponentStr,
-                matchId: decoded.status.matched.matchId.toString(),
-                role,
-              });
-              return true;
+              const opponentAddr = status.opponent;
+              const matchId = status.matchId.toString();
+              // Determine role by comparing addresses lexicographically
+              const role = publicKey < opponentAddr ? "player1" : "player2";
+              resolve({ opponent: opponentAddr, matchId, role });
             }
-          } catch (e) {
+          } catch {
             // Ignore decode errors during transition
           }
-          return false;
         };
 
-        // Subscribe to L1 account changes
-        subscriptionRef.current = l1Connection.onAccountChange(
-          ticketPda,
-          (accountInfo) => tryDecode(accountInfo),
-          "confirmed"
-        );
-
-        // Poll L1 every 3s as fallback (websocket can be unreliable on devnet)
-        const pollL1 = async () => {
-          try {
-            const info = await l1Connection.getAccountInfo(ticketPda);
-            if (info && info.owner.toBase58() !== "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh") {
-              tryDecode(info);
-            }
-          } catch {}
-        };
-        // Immediate check + periodic poll
-        pollL1();
-        pollId = setInterval(pollL1, 3000);
+        // Immediate check + poll every 3s
+        checkTicket();
+        pollId = setInterval(checkTicket, 3000);
       });
 
       if (match) {
@@ -278,32 +288,30 @@ export function useMatchmaking() {
       setState("error");
       throw err;
     }
-  }, [publicKey, profilePda, anchorWallet]);
+  }, [publicKey, profilePda, kitWallet, rpc]);
 
   const cancelSearch = useCallback(() => {
     setState("idle");
     setMatchResult(null);
-    if (subscriptionRef.current !== null) {
-      subscriptionRef.current = null;
-    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       console.log("Cancelling match search...");
     }
 
     // Best-effort on-chain cancel (fire-and-forget)
-    if (publicKey && anchorWallet) {
-      const [tenantPda] = deriveTenantPda(QUEUE_AUTHORITY);
-      getTeeAuthToken(TEE_RPC_URL, anchorWallet)
-        .then(({ token }) => {
-          const teeProvider = createTeeProvider(TEE_RPC_URL, TEE_WS_URL, token, anchorWallet);
-          const teePlayer = new MatchmakingPlayer(teeProvider, DUEL_PROGRAM_ID);
-          return teePlayer.cancelTicket(tenantPda);
+    if (publicKey && kitWallet) {
+      const signer = walletToSigner(kitWallet);
+      deriveTenantPda(QUEUE_AUTHORITY)
+        .then(async ([tenantPda]) => {
+          const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
+          const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
+          const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
+          return sendInstruction(teeRpc, cancelIx, kitWallet);
         })
         .then(() => console.log("Ticket cancelled on-chain"))
         .catch((err) => console.warn("Failed to cancel ticket on-chain (best-effort):", err));
     }
-  }, [publicKey, anchorWallet]);
+  }, [publicKey, kitWallet]);
 
   const reset = useCallback(() => {
     setState("idle");

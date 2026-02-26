@@ -1,5 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
-import BN from "bn.js";
+import type { Address } from "@solana/kit";
 
 // Game State Machine
 export type GameState =
@@ -17,25 +16,25 @@ export enum Choice {
   Scissors = "scissors",
 }
 
-// Game Result enum matching Rust program
+// Game Result
 export type GameResult =
-  | { winner: PublicKey }
+  | { winner: Address }
   | { tie: {} }
   | { none: {} };
 
-// Player Profile (from Rust program)
+// Player Profile (from Rust program via Codama decoder)
 export interface PlayerProfile {
-  player: PublicKey;
-  elo: BN;
-  gamesPlayed: BN;
-  gamesWon: BN;
+  player: Address;
+  elo: bigint;
+  gamesPlayed: bigint;
+  gamesWon: bigint;
 }
 
-// Game Session (from Rust program)
+// Game Session (from Rust program via Codama decoder)
 export interface GameSession {
-  gameId: BN;
-  player1: PublicKey;
-  player2: PublicKey;
+  gameId: bigint;
+  player1: Address;
+  player2: Address;
   player1Choice: Choice | null;
   player2Choice: Choice | null;
   result: GameResult;
@@ -44,23 +43,28 @@ export interface GameSession {
 // UI State
 export interface GameUIState {
   state: GameState;
-  currentGameId: BN | null;
-  opponent: PublicKey | null;
+  currentGameId: bigint | null;
+  opponent: Address | null;
   playerChoice: Choice | null;
   opponentChoice: Choice | null;
   result: GameResult | null;
 }
 
-// Helper to convert Choice enum to Anchor format
-export function choiceToAnchor(choice: Choice): Record<string, {}> {
-  return { [choice]: {} };
+// Helper to convert Choice enum to on-chain discriminated union format
+export function choiceToAnchor(choice: Choice): { __kind: string } {
+  const map: Record<Choice, string> = {
+    [Choice.Rock]: "Rock",
+    [Choice.Paper]: "Paper",
+    [Choice.Scissors]: "Scissors",
+  };
+  return { __kind: map[choice] };
 }
 
-// Helper to parse GameResult from Anchor
+// Helper to parse GameResult from Codama-decoded account data
 export function parseGameResult(result: any): GameResult {
-  if (result.winner) {
-    return { winner: new PublicKey(result.winner) };
-  } else if (result.tie !== undefined) {
+  if (result?.__kind === "Winner" || result?.winner) {
+    return { winner: result.winner as Address };
+  } else if (result?.__kind === "Tie" || result?.tie !== undefined) {
     return { tie: {} };
   } else {
     return { none: {} };
@@ -68,7 +72,7 @@ export function parseGameResult(result: any): GameResult {
 }
 
 // Helper to determine winner from result
-export function getWinner(result: GameResult): PublicKey | null {
+export function getWinner(result: GameResult): Address | null {
   if ("winner" in result) {
     return result.winner;
   }
@@ -80,13 +84,12 @@ export function isTie(result: GameResult): boolean {
   return "tie" in result;
 }
 
-// Helper to format ELO
-export function formatElo(elo: BN): string {
+// Helper to format ELO (bigint → string)
+export function formatElo(elo: bigint): string {
   return elo.toString();
 }
 
 // Helper to format wallet address
-export function formatAddress(address: PublicKey, chars: number = 4): string {
-  const str = address.toBase58();
-  return `${str.slice(0, chars)}...${str.slice(-chars)}`;
+export function formatAddress(addr: Address, chars: number = 4): string {
+  return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
 }

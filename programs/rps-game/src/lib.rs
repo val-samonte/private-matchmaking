@@ -3,6 +3,10 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::{delegate, ephemeral, commit};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_accounts;
+use ephemeral_rollups_sdk::access_control::instructions::{
+    CreatePermissionCpi, CreatePermissionCpiAccounts, CreatePermissionInstructionArgs,
+};
+use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs, AUTHORITY_FLAG};
 
 declare_id!("8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos");
 
@@ -131,6 +135,83 @@ pub mod rps_game {
          Ok(())
     }
     
+    /// Set up permission for player profile PDA so a co-authority can write it on TEE.
+    /// `bump` is the PDA bump from `find_program_address`.
+    /// Must be called BEFORE delegate_pda while the program still owns the PDA.
+    pub fn setup_profile_permission(
+        ctx: Context<SetupProfilePermission>,
+        bump: u8,
+        co_authority: Pubkey,
+    ) -> Result<()> {
+        let player = ctx.accounts.player.key();
+
+        CreatePermissionCpi::new(
+            &ctx.accounts.permission_program,
+            CreatePermissionCpiAccounts {
+                permissioned_account: &ctx.accounts.profile.to_account_info(),
+                permission: &ctx.accounts.permission,
+                payer: &ctx.accounts.player.to_account_info(),
+                system_program: &ctx.accounts.system_program.to_account_info(),
+            },
+            CreatePermissionInstructionArgs {
+                args: MembersArgs {
+                    members: Some(vec![
+                        Member { flags: AUTHORITY_FLAG, pubkey: player },
+                        Member { flags: AUTHORITY_FLAG, pubkey: co_authority },
+                    ]),
+                },
+            },
+        ).invoke_signed(&[&[
+            PLAYER_PROFILE_SEED,
+            player.as_ref(),
+            &[bump],
+        ]])?;
+
+        Ok(())
+    }
+
+    /// Set up permission for a game session PDA so co-authorities can write it on TEE.
+    /// `player1`, `player2`, `game_id`, and `bump` identify the exact session PDA.
+    /// Must be called BEFORE delegate_pda while the program still owns the PDA.
+    pub fn setup_game_session_permission(
+        ctx: Context<SetupGameSessionPermission>,
+        player1: Pubkey,
+        player2: Pubkey,
+        game_id: u64,
+        bump: u8,
+        co_authority: Pubkey,
+    ) -> Result<()> {
+        let p1 = player1;
+        let p2 = player2;
+
+        CreatePermissionCpi::new(
+            &ctx.accounts.permission_program,
+            CreatePermissionCpiAccounts {
+                permissioned_account: &ctx.accounts.game_session.to_account_info(),
+                permission: &ctx.accounts.permission,
+                payer: &ctx.accounts.payer.to_account_info(),
+                system_program: &ctx.accounts.system_program.to_account_info(),
+            },
+            CreatePermissionInstructionArgs {
+                args: MembersArgs {
+                    members: Some(vec![
+                        Member { flags: AUTHORITY_FLAG, pubkey: p1 },
+                        Member { flags: AUTHORITY_FLAG, pubkey: p2 },
+                        Member { flags: AUTHORITY_FLAG, pubkey: co_authority },
+                    ]),
+                },
+            },
+        ).invoke_signed(&[&[
+            GAME_SESSION_SEED,
+            p1.as_ref(),
+            p2.as_ref(),
+            &game_id.to_le_bytes(),
+            &[bump],
+        ]])?;
+
+        Ok(())
+    }
+
     // Close functions for cleanup
     pub fn close_player(_ctx: Context<ClosePlayer>) -> Result<()> { Ok(()) }
 
@@ -244,6 +325,34 @@ pub struct PersistResults<'info> {
     pub player2_profile: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SetupProfilePermission<'info> {
+    /// CHECK: Profile PDA — seeds verified by invoke_signed in handler
+    pub profile: AccountInfo<'info>,
+    #[account(mut)]
+    pub player: Signer<'info>,
+    /// CHECK: Permission PDA for the profile account
+    #[account(mut)]
+    pub permission: AccountInfo<'info>,
+    /// CHECK: Permission program
+    pub permission_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetupGameSessionPermission<'info> {
+    /// CHECK: Game session PDA — seeds verified by invoke_signed in handler
+    pub game_session: AccountInfo<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: Permission PDA for the game session account
+    #[account(mut)]
+    pub permission: AccountInfo<'info>,
+    /// CHECK: Permission program
+    pub permission_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[delegate]

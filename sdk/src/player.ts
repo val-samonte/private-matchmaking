@@ -1,225 +1,129 @@
-import * as anchor from "@coral-xyz/anchor";
-import * as web3 from "@solana/web3.js";
-import type { Duel } from "./types.js";
-import IDL from "./duel.json" with { type: "json" };
+import {
+  createSolanaRpc,
+  type Address,
+  type TransactionSigner,
+  type Rpc,
+  type SolanaRpcApi,
+} from "@solana/kit";
+import {
+  getCreateTicketInstructionAsync,
+  getDelegateTicketInstructionAsync,
+  getJoinQueueInstructionAsync,
+  getCancelTicketInstructionAsync,
+  getCloseTicketInstructionAsync,
+  fetchMaybeMatchTicket,
+  accountType,
+} from "./generated/duel/index.js";
+import { sendInstruction } from "./transaction.js";
 import * as utils from "./utils.js";
 
+const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
+
 export class MatchmakingPlayer {
-  public program: anchor.Program<Duel>;
-  public provider: anchor.AnchorProvider;
+  public rpc: Rpc<SolanaRpcApi>;
+  public signer: TransactionSigner;
+  public programId: Address;
 
-  constructor(provider: anchor.AnchorProvider, programId: web3.PublicKey | string) {
-    const address = typeof programId === "string" ? programId : programId.toBase58();
-    const idl = { ...IDL, address };
-    this.program = new anchor.Program(idl as any, provider);
-    this.provider = provider;
+  constructor(
+    rpc: Rpc<SolanaRpcApi>,
+    signer: TransactionSigner,
+    programId: Address = DUEL_PROGRAM_ID,
+  ) {
+    this.rpc = rpc;
+    this.signer = signer;
+    this.programId = programId;
   }
 
-  /**
-   * Derive MatchTicket PDA
-   */
-  getTicketPda(player: web3.PublicKey, tenant: web3.PublicKey): web3.PublicKey {
-    return utils.deriveTicketPda(this.program.programId, player, tenant);
+  async getTicketPda(player: Address, tenant: Address): Promise<Address> {
+    return utils.deriveTicketPda(this.programId, player, tenant);
   }
 
-  /**
-   * Fetch MatchTicket account data
-   */
-  async getTicket(ticketPda: web3.PublicKey): Promise<any> {
-    return await this.program.account.matchTicket.fetch(ticketPda);
+  async getTicket(ticketPda: Address) {
+    return fetchMaybeMatchTicket(this.rpc, ticketPda);
   }
 
-  /**
-   * Create MatchTicket PDA on L1
-   */
-  async createTicket(
-    tenant: web3.PublicKey,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
-    return await this.program.methods
-      .createTicket()
-      .accountsPartial({
-        ticket: ticketPda,
-        tenant: tenant,
-        player: this.provider.publicKey,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
+  async createTicket(tenant: Address): Promise<string> {
+    const ix = await getCreateTicketInstructionAsync({
+      player: this.signer,
+      tenant,
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
   }
 
-  /**
-   * Delegate ticket into TEE (becomes invisible on L1)
-   */
   async delegateTicket(
-    player: web3.PublicKey,
-    tenant: web3.PublicKey,
-    validator: web3.PublicKey = new web3.PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"),
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const ticketPda = this.getTicketPda(player, tenant);
-    return await this.program.methods
-      .delegateTicket({ ticket: { player, tenant } } as any)
-      .accounts({
-        pda: ticketPda,
-        payer: this.provider.publicKey,
-        validator: validator,
-      } as any)
-      .signers(signers)
-      .rpc(confirmOptions);
+    player: Address,
+    tenant: Address,
+    validator?: Address,
+  ): Promise<string> {
+    const ticketPda = await this.getTicketPda(player, tenant);
+    const ix = await getDelegateTicketInstructionAsync({
+      pda: ticketPda,
+      payer: this.signer,
+      validator,
+      accountType: accountType("Ticket", { player, tenant }),
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
   }
 
-  /**
-   * Join Queue (TEE Aware) - now requires ticket
-   */
   async joinQueue(
-    queue: web3.PublicKey,
-    tenant: web3.PublicKey,
-    playerData: web3.PublicKey,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
-    return await this.program.methods
-      .joinQueue()
-      .accountsPartial({
-        queue: queue,
-        tenant: tenant,
-        playerData: playerData,
-        playerTicket: ticketPda,
-        signer: this.provider.publicKey,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
+    queue: Address,
+    tenant: Address,
+    playerData: Address,
+  ): Promise<string> {
+    const ix = await getJoinQueueInstructionAsync({
+      queue,
+      tenant,
+      playerData,
+      signer: this.signer,
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
+  }
+
+  async cancelTicket(tenant: Address): Promise<string> {
+    const ix = await getCancelTicketInstructionAsync({
+      player: this.signer,
+      tenant,
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
+  }
+
+  async closeTicket(tenant: Address): Promise<string> {
+    const ix = await getCloseTicketInstructionAsync({
+      player: this.signer,
+      tenant,
+    }, { programAddress: this.programId });
+    return sendInstruction(this.rpc, ix, this.signer);
   }
 
   /**
-   * Cancel search, marks ticket as Cancelled (runs in TEE)
-   */
-  async cancelTicket(
-    tenant: web3.PublicKey,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
-    return await this.program.methods
-      .cancelTicket()
-      .accountsPartial({
-        ticket: ticketPda,
-        tenant: tenant,
-        player: this.provider.publicKey,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
-  }
-
-  /**
-   * Close ticket and reclaim rent (L1, after match consumed or cancelled)
-   */
-  async closeTicket(
-    tenant: web3.PublicKey,
-    confirmOptions?: web3.ConfirmOptions,
-    signers: web3.Keypair[] = []
-  ): Promise<web3.TransactionSignature> {
-    const ticketPda = this.getTicketPda(this.provider.publicKey, tenant);
-    return await this.program.methods
-      .closeTicket()
-      .accountsPartial({
-        ticket: ticketPda,
-        tenant: tenant,
-        player: this.provider.publicKey,
-      })
-      .signers(signers)
-      .rpc(confirmOptions);
-  }
-
-  /**
-   * Wait for match by subscribing to ticket PDA changes on L1.
-   * Returns match info when ticket status changes to Matched.
-   */
-  async waitForMatch(
-    ticketPda: web3.PublicKey,
-    connection: web3.Connection,
-    timeoutMs: number = 120000
-  ): Promise<{ opponent: web3.PublicKey; matchId: anchor.BN } | null> {
-    return new Promise((resolve, reject) => {
-      let subscriptionId: number | null = null;
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-      const cleanup = () => {
-        if (timeoutId) clearTimeout(timeoutId);
-        if (subscriptionId !== null) {
-          connection.removeAccountChangeListener(subscriptionId);
-        }
-      };
-
-      // Set timeout
-      timeoutId = setTimeout(() => {
-        cleanup();
-        resolve(null);
-      }, timeoutMs);
-
-      // Subscribe to account changes on L1
-      subscriptionId = connection.onAccountChange(
-        ticketPda,
-        (accountInfo: web3.AccountInfo<Buffer>) => {
-          try {
-            const decoded = this.program.coder.accounts.decode(
-              "matchTicket",
-              accountInfo.data
-            );
-            if (decoded.status.matched) {
-              cleanup();
-              resolve({
-                opponent: decoded.status.matched.opponent,
-                matchId: decoded.status.matched.matchId,
-              });
-            }
-          } catch (e) {
-            // Ignore decode errors (account may be in transition)
-          }
-        },
-        "confirmed"
-      );
-    });
-  }
-
-  /**
-   * Poll L1 for ticket status (fallback for environments without websocket)
+   * Poll L1 for ticket status.
+   * Returns match info when status becomes Matched.
    */
   async pollForMatch(
-    ticketPda: web3.PublicKey,
-    connection: web3.Connection,
-    maxAttempts: number = 60,
-    pollInterval: number = 2000,
-    signal?: AbortSignal
-  ): Promise<{ opponent: web3.PublicKey; matchId: anchor.BN } | null> {
+    ticketPda: Address,
+    maxAttempts = 60,
+    pollInterval = 2000,
+    signal?: AbortSignal,
+  ): Promise<{ opponent: Address; matchId: bigint } | null> {
     for (let i = 0; i < maxAttempts; i++) {
       if (signal?.aborted) return null;
-
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
-
+      await new Promise((r) => setTimeout(r, pollInterval));
       try {
-        const accountInfo = await connection.getAccountInfo(ticketPda);
-        if (!accountInfo) continue;
-
-        const decoded = this.program.coder.accounts.decode(
-          "matchTicket",
-          accountInfo.data
-        );
-
-        if (decoded.status.matched) {
-          return {
-            opponent: decoded.status.matched.opponent,
-            matchId: decoded.status.matched.matchId,
-          };
+        const maybeTicket = await fetchMaybeMatchTicket(this.rpc, ticketPda);
+        if (!maybeTicket.exists) continue;
+        const status = maybeTicket.data.status;
+        if (status.__kind === "Matched") {
+          return { opponent: status.opponent, matchId: status.matchId };
         }
-      } catch (e) {
-        // Account may not exist yet or be in transition
+      } catch {
+        // Ignore decode errors during transition
       }
     }
     return null;
+  }
+
+  /** Create a new MatchmakingPlayer pointing at a TEE RPC endpoint. */
+  withRpc(teeUrl: string): MatchmakingPlayer {
+    return new MatchmakingPlayer(createSolanaRpc(teeUrl), this.signer, this.programId);
   }
 }

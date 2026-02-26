@@ -1,70 +1,74 @@
-import { PublicKey, Connection } from "@solana/web3.js";
-import { AnchorProvider } from "@coral-xyz/anchor";
-import type { AnchorCompatWallet } from "@/lib/utils/wallet-bridge";
-import {
-  getAuthToken,
-  waitUntilPermissionActive,
-} from "@magicblock-labs/ephemeral-rollups-sdk";
+import type { Address } from "@solana/kit";
+import type { KitWallet } from "./wallet-bridge";
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+const DELEGATION_PROGRAM = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 
 /**
- * Create an L1 AnchorProvider using the wallet bridge.
- * skipPreflight is always true to avoid "Blockhash not found" on devnet.
- */
-export function createL1Provider(
-  connection: Connection,
-  wallet: AnchorCompatWallet,
-): AnchorProvider {
-  return new AnchorProvider(connection, wallet as any, {
-    commitment: "confirmed",
-    skipPreflight: true,
-  });
-}
-
-/**
- * Get TEE authentication token using the wallet bridge's signMessage.
+ * Get TEE authentication token using the wallet's signMessage.
+ * Uses the MagicBlock TEE challenge-sign flow.
  */
 export async function getTeeAuthToken(
   rpcUrl: string,
-  wallet: AnchorCompatWallet,
+  wallet: KitWallet,
 ): Promise<{ token: string; expiresAt: number }> {
-  return await getAuthToken(
-    rpcUrl,
-    wallet.publicKey,
-    async (message: Uint8Array) => wallet.signMessage(message),
+  // 1. GET challenge from TEE
+  const challengeRes = await fetch(
+    `${rpcUrl}/auth/challenge?pubkey=${wallet.address}`
   );
+  if (!challengeRes.ok) {
+    throw new Error(`TEE challenge failed: ${challengeRes.statusText}`);
+  }
+  const { challenge } = await challengeRes.json();
+
+  // 2. Sign challenge bytes with wallet
+  const challengeBytes = new TextEncoder().encode(challenge as string);
+  const sig = await wallet.signMessage(challengeBytes);
+
+  // 3. POST signature to get token
+  const tokenRes = await fetch(`${rpcUrl}/auth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pubkey: wallet.address,
+      challenge,
+      signature: Array.from(sig),
+    }),
+  });
+  if (!tokenRes.ok) {
+    throw new Error(`TEE token request failed: ${tokenRes.statusText}`);
+  }
+  return tokenRes.json();
 }
 
 /**
- * Create TEE-authenticated provider.
- */
-export function createTeeProvider(
-  rpcUrl: string,
-  wsUrl: string,
-  token: string,
-  wallet: AnchorCompatWallet,
-): AnchorProvider {
-  const connection = new Connection(`${rpcUrl}?token=${token}`, {
-    wsEndpoint: `${wsUrl}?token=${token}`,
-    commitment: "confirmed",
-  });
-
-  return new AnchorProvider(connection, wallet as any, {
-    commitment: "confirmed",
-    skipPreflight: true,
-  });
-}
-
-/**
- * Wait for account delegation to TEE
+ * Wait for account delegation to activate on TEE.
+ * Polls the TEE RPC until the account owner is the delegation program.
  */
 export async function waitForDelegation(
   teeRpcUrl: string,
   token: string,
-  pda: PublicKey,
+  pda: Address,
+  timeoutMs = 30000,
 ): Promise<void> {
-  await waitUntilPermissionActive(`${teeRpcUrl}?token=${token}`, pda);
+  const url = `${teeRpcUrl}?token=${token}`;
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getAccountInfo",
+        params: [pda, { encoding: "base64" }],
+      }),
+    });
+    const json = await res.json();
+    const owner = json?.result?.value?.owner;
+    if (owner === DELEGATION_PROGRAM) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  throw new Error(`Delegation timeout after ${timeoutMs}ms for ${pda}`);
 }

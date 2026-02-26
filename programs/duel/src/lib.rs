@@ -4,6 +4,10 @@ use anchor_lang::solana_program::program::invoke;
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_accounts;
+use ephemeral_rollups_sdk::access_control::instructions::{
+    CreatePermissionCpi, CreatePermissionCpiAccounts, CreatePermissionInstructionArgs,
+};
+use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs, AUTHORITY_FLAG};
 
 declare_id!("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
 
@@ -95,6 +99,43 @@ pub mod duel {
                 ..Default::default()
             },
         )?;
+        Ok(())
+    }
+
+    /// Set up permission for ticket PDA so queueAuthority can write it on TEE.
+    /// Must be called BEFORE delegate_ticket while the program still owns the PDA.
+    pub fn setup_ticket_permission(ctx: Context<SetupTicketPermission>) -> Result<()> {
+        let ticket = &ctx.accounts.ticket;
+        let queue_authority = ctx.accounts.tenant.authority;
+        let player = ctx.accounts.player.key();
+        let tenant_key = ctx.accounts.tenant.key();
+        let bump = ticket.bump;
+
+        let permission_program_info = &ctx.accounts.permission_program;
+
+        CreatePermissionCpi::new(
+            permission_program_info,
+            CreatePermissionCpiAccounts {
+                permissioned_account: &ctx.accounts.ticket.to_account_info(),
+                permission: &ctx.accounts.permission,
+                payer: &ctx.accounts.player.to_account_info(),
+                system_program: &ctx.accounts.system_program.to_account_info(),
+            },
+            CreatePermissionInstructionArgs {
+                args: MembersArgs {
+                    members: Some(vec![
+                        Member { flags: AUTHORITY_FLAG, pubkey: player },
+                        Member { flags: AUTHORITY_FLAG, pubkey: queue_authority },
+                    ]),
+                },
+            },
+        ).invoke_signed(&[&[
+            TICKET_SEED,
+            player.as_ref(),
+            tenant_key.as_ref(),
+            &[bump],
+        ]])?;
+
         Ok(())
     }
 
@@ -502,6 +543,24 @@ pub struct CreateTicket<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct SetupTicketPermission<'info> {
+    #[account(
+        seeds = [TICKET_SEED, player.key().as_ref(), tenant.key().as_ref()],
+        bump = ticket.bump,
+    )]
+    pub ticket: Account<'info, MatchTicket>,
+    pub tenant: Account<'info, Tenant>,
+    #[account(mut)]
+    pub player: Signer<'info>,
+    /// CHECK: Permission PDA derived from ticket (seeds: [b"permission:", ticket_key])
+    #[account(mut)]
+    pub permission: AccountInfo<'info>,
+    /// CHECK: Permission program (ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1)
+    pub permission_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateTicket<'info> {
@@ -549,8 +608,7 @@ pub struct JoinQueue<'info> {
         constraint = queue.tenant == tenant.key() @ MatchmakingError::InvalidTenant
     )]
     pub tenant: Account<'info, Tenant>,
-    /// CHECK: We inspect the owner and data manually.
-    #[account(mut)]
+    /// CHECK: We inspect the owner and data manually (read-only).
     pub player_data: AccountInfo<'info>,
     #[account(
         mut,

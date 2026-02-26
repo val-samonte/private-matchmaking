@@ -1,26 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { PublicKey } from "@solana/web3.js";
+import type { Address } from "@solana/kit";
 import { useGameSession } from "@/lib/hooks/useGameSession";
 import { Choice, getWinner, isTie, formatAddress } from "@/lib/types/rps";
 
 interface GameBoardProps {
-  opponent: PublicKey;
+  opponent: Address;
   gameId: number;
   role: "player1" | "player2";
   onGameComplete: () => void;
 }
 
 export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardProps) {
-  const { 
-    gameState, 
-    playerChoice, 
-    result, 
+  const {
+    gameState,
+    playerChoice,
+    result,
     error,
-    startGame, 
-    makeChoice, 
-    persistResults 
+    startGame,
+    makeChoice,
+    persistResults,
   } = useGameSession();
 
   const [selectedChoice, setSelectedChoice] = useState<Choice | null>(null);
@@ -34,7 +34,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
 
   const handleChoiceClick = async (choice: Choice) => {
     if (gameState !== "ready") return;
-    
     setSelectedChoice(choice);
     try {
       await makeChoice(choice);
@@ -46,10 +45,7 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
   const handlePersist = async () => {
     try {
       await persistResults();
-      // Wait a bit for the transaction to settle
-      setTimeout(() => {
-        onGameComplete();
-      }, 2000);
+      setTimeout(() => { onGameComplete(); }, 2000);
     } catch (err) {
       console.error("Failed to persist results:", err);
     }
@@ -64,7 +60,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
   };
 
   const renderContent = () => {
-    // Starting/Delegating state
     if (gameState === "starting" || gameState === "delegating") {
       return (
         <div className="text-center space-y-4">
@@ -78,7 +73,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
       );
     }
 
-    // Ready to choose
     if (gameState === "ready") {
       return (
         <div className="space-y-6">
@@ -99,7 +93,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
       );
     }
 
-    // Waiting for opponent
     if (gameState === "waiting_opponent" || gameState === "resolving") {
       return (
         <div className="text-center space-y-4">
@@ -113,7 +106,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
       );
     }
 
-    // Persisting results
     if (gameState === "persisting") {
       return (
         <div className="text-center space-y-4">
@@ -125,7 +117,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
       );
     }
 
-    // Game complete - show results
     if (gameState === "complete" && result) {
       const winner = getWinner(result);
       const tie = isTie(result);
@@ -135,13 +126,13 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
           <div className="text-6xl mb-4">
             {tie ? "🤝" : winner ? "🎉" : "❓"}
           </div>
-          
+
           <div className="space-y-2">
             {tie ? (
-              <p className="text-3xl font-bold text-warning">It's a Tie!</p>
+              <p className="text-3xl font-bold text-warning">It&apos;s a Tie!</p>
             ) : winner ? (
               <p className="text-3xl font-bold text-success">
-                {winner.equals(opponent) ? "You Lost!" : "You Won!"}
+                {winner === opponent ? "You Lost!" : "You Won!"}
               </p>
             ) : (
               <p className="text-3xl font-bold">Game Complete</p>
@@ -165,7 +156,6 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
       );
     }
 
-    // Error state
     if (error) {
       return (
         <div className="text-center space-y-4">

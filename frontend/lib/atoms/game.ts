@@ -1,7 +1,6 @@
 import { atom } from "jotai";
-import { PublicKey } from "@solana/web3.js";
-import BN from "bn.js";
-import { GameState, Choice, GameResult } from "../types/rps";
+import type { Address } from "@solana/kit";
+import type { GameState, Choice, GameResult } from "../types/rps";
 
 /**
  * Game state atom
@@ -9,14 +8,14 @@ import { GameState, Choice, GameResult } from "../types/rps";
 export const gameStateAtom = atom<GameState>("idle");
 
 /**
- * Current game ID atom
+ * Current game ID atom (bigint for u64)
  */
-export const currentGameIdAtom = atom<BN | null>(null);
+export const currentGameIdAtom = atom<bigint | null>(null);
 
 /**
- * Opponent public key atom
+ * Opponent address atom
  */
-export const opponentAtom = atom<PublicKey | null>(null);
+export const opponentAtom = atom<Address | null>(null);
 
 /**
  * Player's choice atom

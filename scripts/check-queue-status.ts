@@ -1,60 +1,49 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { Duel } from "../target/types/duel";
-import { RpsGame } from "../target/types/rps_game";
-import { PublicKey } from "@solana/web3.js";
+import { createSolanaRpc, type Address } from "@solana/kit";
+import { fetchMaybeTenant, fetchMaybeQueue, utils } from "../sdk/src/index.js";
 
-// This script checks if the queue and tenant are initialized
+const { deriveQueuePda, deriveTenantPda } = utils;
+
+const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
+const RPS_GAME_PROGRAM_ID = "8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos" as Address;
+const L1_RPC_URL = "https://api.devnet.solana.com";
+
+// Pass queue authority as first CLI arg, or defaults to RPS program ID
+const queueAuthority = (process.argv[2] ?? RPS_GAME_PROGRAM_ID) as Address;
+
 async function main() {
-  const provider = anchor.AnchorProvider.env();
-  anchor.setProvider(provider);
+  const rpc = createSolanaRpc(L1_RPC_URL);
 
-  const duelProgram = anchor.workspace.Duel as Program<Duel>;
-  const rpsProgram = anchor.workspace.RpsGame as Program<RpsGame>;
+  const tenantPda = await deriveTenantPda(DUEL_PROGRAM_ID, queueAuthority);
+  const queuePda = await deriveQueuePda(DUEL_PROGRAM_ID, queueAuthority);
 
-  // Queue authority is the RPS game program ID
-  const queueAuthority = rpsProgram.programId;
-  
-  const [queuePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("queue"), queueAuthority.toBuffer()],
-    duelProgram.programId
-  );
-
-  const [tenantPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("tenant"), queueAuthority.toBuffer()],
-    duelProgram.programId
-  );
-
-  console.log("Queue Authority (RPS Program):", queueAuthority.toBase58());
-  console.log("Queue PDA:", queuePda.toBase58());
-  console.log("Tenant PDA:", tenantPda.toBase58());
+  console.log("Queue Authority:", queueAuthority);
+  console.log("Tenant PDA:", tenantPda);
+  console.log("Queue PDA:", queuePda);
   console.log("");
 
-  // Check if tenant exists
-  try {
-    const tenant = await duelProgram.account.tenant.fetch(tenantPda);
-    console.log("✅ Tenant exists:");
-    console.log("  - Authority:", tenant.authority.toBase58());
-    console.log("  - Tenant Program ID:", tenant.tenantProgramId.toBase58());
-    console.log("  - ELO Offset:", tenant.eloOffset);
-    console.log("  - ELO Size:", tenant.eloSize);
-    console.log("  - ELO Window:", tenant.eloWindow.toString());
-  } catch (err) {
-    console.log("❌ Tenant does NOT exist");
-    console.log("   You need to run: npm run init-queue");
+  const maybeTenant = await fetchMaybeTenant(rpc, tenantPda);
+  if (maybeTenant.exists) {
+    const t = maybeTenant.data;
+    console.log("Tenant exists:");
+    console.log("  - Authority:", t.authority);
+    console.log("  - Tenant Program ID:", t.tenantProgramId);
+    console.log("  - ELO Offset:", t.eloOffset);
+    console.log("  - ELO Size:", t.eloSize);
+    console.log("  - ELO Window:", t.eloWindow.toString());
+  } else {
+    console.log("Tenant does NOT exist - run: npx tsx scripts/init-queue.ts");
   }
   console.log("");
 
-  // Check if queue exists
-  try {
-    const queue = await duelProgram.account.queue.fetch(queuePda);
-    console.log("✅ Queue exists:");
-    console.log("  - Authority:", queue.authority.toBase58());
-    console.log("  - Tenant:", queue.tenant.toBase58());
-    console.log("  - Entries:", queue.entries.length);
-  } catch (err) {
-    console.log("❌ Queue does NOT exist");
-    console.log("   You need to run: npm run init-queue");
+  const maybeQueue = await fetchMaybeQueue(rpc, queuePda);
+  if (maybeQueue.exists) {
+    const q = maybeQueue.data;
+    console.log("Queue exists:");
+    console.log("  - Authority:", q.authority);
+    console.log("  - Tenant:", q.tenant);
+    console.log("  - Entries:", q.entries.length);
+  } else {
+    console.log("Queue does NOT exist - run: npx tsx scripts/init-queue.ts");
   }
 }
 

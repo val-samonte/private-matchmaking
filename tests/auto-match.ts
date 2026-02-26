@@ -1,537 +1,483 @@
-import * as anchor from "@coral-xyz/anchor";
-import type { RpsGame } from "../target/types/rps_game";
-import type { Duel } from "../target/types/duel";
-import * as web3 from "@solana/web3.js";
-
 import { assert } from "chai";
-
+import { readFileSync } from "fs";
+import { homedir } from "os";
 import {
-  getAuthToken,
-  waitUntilPermissionActive,
-} from "@magicblock-labs/ephemeral-rollups-sdk";
-import nacl from "tweetnacl";
-import { BN } from "bn.js";
+  generateKeyPairSigner,
+  createKeyPairSignerFromBytes,
+  createSolanaRpc,
+  getProgramDerivedAddress,
+  getAddressEncoder,
+  getUtf8Encoder,
+  AccountRole,
+  type Address,
+  type KeyPairSigner,
+  type Instruction,
+} from "@solana/kit";
 import * as crypto from "crypto";
+
 import { MatchmakingAdmin } from "../sdk/src/admin.js";
 import { MatchmakingPlayer } from "../sdk/src/player.js";
-import * as sdk from "../sdk/src/index.js";
+import { getAuthToken, waitUntilPermissionActive } from "../sdk/src/tee.js";
+import { sendInstruction } from "../sdk/src/transaction.js";
+
+import {
+  getInitializePlayerInstructionAsync,
+  getDelegatePdaInstructionAsync,
+  getMakeChoiceInstruction,
+  getStartGameWithTicketInstructionAsync,
+  getPersistResultsInstruction,
+} from "../sdk/src/generated/rps-game/index.js";
+import {
+  fetchGameSession,
+  fetchPlayerProfile,
+} from "../sdk/src/generated/rps-game/accounts/index.js";
+import { Choice } from "../sdk/src/generated/rps-game/types/index.js";
+import { accountType as rpsAccountType } from "../sdk/src/generated/rps-game/types/accountType.js";
+
+// Program IDs
+const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
+const RPS_GAME_PROGRAM_ID = "8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos" as Address;
+const ER_VALIDATOR = "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA" as Address;
+
+const TEE_RPC_URL = "https://tee.magicblock.app";
+const L1_RPC_URL = "https://api.devnet.solana.com";
+
+const addressEncoder = getAddressEncoder();
+const utf8Encoder = getUtf8Encoder();
 
 describe("web3-matchmaking-with-tickets", () => {
-  const provider = anchor.AnchorProvider.env();
-  anchor.setProvider(provider);
+  const l1Rpc = createSolanaRpc(L1_RPC_URL);
 
-  const rpsGame = anchor.workspace.RpsGame as anchor.Program<RpsGame>;
-  const privateMatchmaking = anchor.workspace.Duel as anchor.Program<Duel>;
+  // Funded payer loaded from Anchor wallet (~/.config/solana/id.json)
+  let payer: KeyPairSigner;
+  let player1: KeyPairSigner;
+  let player2: KeyPairSigner;
+  let queueAuthority: KeyPairSigner;
 
-  // Seeds
-  // const queueSeed = Buffer.from("queue"); // Moved to SDK
-  const ticketSeed = Buffer.from("ticket"); // Moved to SDK
-  const playerProfileSeed = Buffer.from("player_profile_v35");
+  let queuePda: Address;
+  let tenantPda: Address;
+  let p1TicketPda: Address;
+  let p2TicketPda: Address;
+  let p1ProfilePda: Address;
+  let p2ProfilePda: Address;
 
-  // Hardcoded Validator from Reference
-  const ER_VALIDATOR = new web3.PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
+  let token1: string;
+  let token2: string;
+  let tokenQ: string;
 
-  // TEE Configuration
-  const TEE_RPC_URL = "https://tee.magicblock.app";
-  const TEE_WS_URL = "wss://tee.magicblock.app";
+  before("Generate keypairs and fund", async () => {
+    // Load funded wallet from ~/.config/solana/id.json (set by Anchor.toml)
+    const payerBytes = new Uint8Array(
+      JSON.parse(readFileSync(`${homedir()}/.config/solana/id.json`, "utf-8"))
+    );
+    payer = await createKeyPairSignerFromBytes(payerBytes);
+    player1 = await generateKeyPairSigner();
+    player2 = await generateKeyPairSigner();
+    queueAuthority = await generateKeyPairSigner();
 
-  const queueAuthority = web3.Keypair.generate();
-  
-  // Use SDK utils for Queue PDA
-  const queuePda = sdk.utils.deriveQueuePda(
-     privateMatchmaking.programId, 
-    queueAuthority.publicKey
-  );
+    // Fund test accounts from the payer wallet in a single transaction
+    const LAMPORTS = 100_000_000n; // 0.1 SOL each
+    const { sendInstructions } = await import("../sdk/src/transaction.js");
+    await sendInstructions(
+      l1Rpc,
+      [player1, player2, queueAuthority].map((dest) => {
+        const buf = new Uint8Array(12);
+        new DataView(buf.buffer).setUint32(0, 2, true);
+        new DataView(buf.buffer).setBigUint64(4, LAMPORTS, true);
+        return {
+          programAddress: "11111111111111111111111111111111" as Address,
+          accounts: [
+            { address: payer.address, role: AccountRole.WRITABLE_SIGNER },
+            { address: dest.address, role: AccountRole.WRITABLE },
+          ],
+          data: buf,
+        } satisfies Instruction;
+      }),
+      payer,
+    );
+    // Wait for transfer to land
+    await new Promise((r) => setTimeout(r, 2000));
 
-  // Use SDK utils for Tenant PDA
-  const tenantPda = sdk.utils.deriveTenantPda(
-    privateMatchmaking.programId, 
-    queueAuthority.publicKey
-  );
-
-  const player1 = web3.Keypair.generate();
-  const player2 = web3.Keypair.generate();
-
-  // Derive ticket PDAs using SDK utils (MatchmakingPlayer)
-  // We can use the utility directly since we don't have the instance yet, 
-  // or we can simulate it. Let's use the raw utils from the SDK if exported, 
-  // or just use the class helper method pattern if not.
-  // Actually, we exported `utils` in index.ts, so let's import that.
-  
-  const p1TicketPda = new MatchmakingPlayer(provider, privateMatchmaking.programId).getTicketPda(player1.publicKey, tenantPda);
-  const p2TicketPda = new MatchmakingPlayer(provider, privateMatchmaking.programId).getTicketPda(player2.publicKey, tenantPda);
-
-  const [p1ProfilePda] = web3.PublicKey.findProgramAddressSync(
-    [playerProfileSeed, player1.publicKey.toBuffer()],
-    rpsGame.programId
-  );
-  const [p2ProfilePda] = web3.PublicKey.findProgramAddressSync(
-    [playerProfileSeed, player2.publicKey.toBuffer()],
-    rpsGame.programId
-  );
-
-  let providerL1Player1: anchor.AnchorProvider;
-  let providerL1Player2: anchor.AnchorProvider;
-  let providerTeePlayer1: anchor.AnchorProvider;
-  let providerTeePlayer2: anchor.AnchorProvider;
-  let providerTeeQueueAuth: anchor.AnchorProvider;
-
-  let token1: any;
-  let token2: any;
-  let tokenQ: any;
-
-  // Helpers
-  async function getTeeProgram(signer: web3.Keypair, customProvider?: anchor.AnchorProvider): Promise<anchor.Program<RpsGame>> {
-    const p = customProvider || new anchor.AnchorProvider(new anchor.web3.Connection(TEE_RPC_URL), new anchor.Wallet(signer), { commitment: "confirmed" });
-    return new anchor.Program(rpsGame.idl as any, p);
-  }
-
-  async function getMatchmakingProgram(signer: web3.Keypair, customProvider?: anchor.AnchorProvider): Promise<anchor.Program<Duel>> {
-    const p = customProvider || new anchor.AnchorProvider(new anchor.web3.Connection(TEE_RPC_URL), new anchor.Wallet(signer), { commitment: "confirmed" });
-    return new anchor.Program(privateMatchmaking.idl as any, p);
-  }
-
-  // Robust transaction sender
-  async function sendAndConfirmRobust(program: anchor.Program<any>, instructionPromise: Promise<any>, signers: web3.Keypair[] = []) {
-    const provider = program.provider as anchor.AnchorProvider;
-    const connection = provider.connection;
-
-    const tx = await instructionPromise;
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = provider.wallet.publicKey;
-
-    if (signers.length > 0) {
-      tx.partialSign(...signers);
-    }
-    const signedTx = await provider.wallet.signTransaction(tx);
-    const rawTx = signedTx.serialize();
-
-    const signature = await connection.sendRawTransaction(rawTx, {
-      skipPreflight: true,
-      preflightCommitment: "confirmed",
+    // Derive PDAs
+    const [tPda] = await getProgramDerivedAddress({
+      programAddress: DUEL_PROGRAM_ID,
+      seeds: [utf8Encoder.encode("tenant"), addressEncoder.encode(queueAuthority.address)],
     });
-    console.log(`Sent tx: ${signature}. Waiting for confirmation...`);
+    tenantPda = tPda;
 
-    let confirmed = false;
-    while (!confirmed) {
-      const currentHeight = await connection.getBlockHeight("confirmed");
-      if (currentHeight > lastValidBlockHeight) {
-        throw new Error(`web3.Transaction ${signature} expired without confirmation.`);
-      }
+    const [qPda] = await getProgramDerivedAddress({
+      programAddress: DUEL_PROGRAM_ID,
+      seeds: [utf8Encoder.encode("queue"), addressEncoder.encode(queueAuthority.address)],
+    });
+    queuePda = qPda;
 
-      const status = await connection.getSignatureStatus(signature);
-      if (status.value?.confirmationStatus === "confirmed" || status.value?.confirmationStatus === "finalized") {
-        if (status.value.err) {
-          throw new Error(`web3.Transaction ${signature} failed: ${JSON.stringify(status.value.err)}`);
-        }
-        confirmed = true;
-        return signature;
-      }
+    const [t1Pda] = await getProgramDerivedAddress({
+      programAddress: DUEL_PROGRAM_ID,
+      seeds: [
+        utf8Encoder.encode("ticket"),
+        addressEncoder.encode(player1.address),
+        addressEncoder.encode(tenantPda),
+      ],
+    });
+    p1TicketPda = t1Pda;
 
-      if (status.value === null) {
-        await connection.sendRawTransaction(rawTx, {
-          skipPreflight: true,
-          preflightCommitment: "confirmed",
-        });
-      }
+    const [t2Pda] = await getProgramDerivedAddress({
+      programAddress: DUEL_PROGRAM_ID,
+      seeds: [
+        utf8Encoder.encode("ticket"),
+        addressEncoder.encode(player2.address),
+        addressEncoder.encode(tenantPda),
+      ],
+    });
+    p2TicketPda = t2Pda;
 
-      await new Promise(r => setTimeout(r, 2000));
-    }
-    return signature;
-  }
+    const [prof1Pda] = await getProgramDerivedAddress({
+      programAddress: RPS_GAME_PROGRAM_ID,
+      seeds: [utf8Encoder.encode("player_profile_v35"), addressEncoder.encode(player1.address)],
+    });
+    p1ProfilePda = prof1Pda;
 
-  before("Setup and Fund", async () => {
-    const payer = (provider.wallet as anchor.Wallet).payer;
-    await web3.sendAndConfirmTransaction(provider.connection, new web3.Transaction().add(
-      web3.SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: player1.publicKey, lamports: 0.1 * 10 ** 9 }),
-      web3.SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: player2.publicKey, lamports: 0.1 * 10 ** 9 }),
-      web3.SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: queueAuthority.publicKey, lamports: 0.1 * 10 ** 9 })
-    ), [payer]);
+    const [prof2Pda] = await getProgramDerivedAddress({
+      programAddress: RPS_GAME_PROGRAM_ID,
+      seeds: [utf8Encoder.encode("player_profile_v35"), addressEncoder.encode(player2.address)],
+    });
+    p2ProfilePda = prof2Pda;
 
-    // Consistent confirm options matching MagicBlock reference examples
-    const confirmOpts = { commitment: "confirmed" as const, skipPreflight: true };
+    // Authenticate with TEE
+    const auth1 = await getAuthToken(TEE_RPC_URL, player1);
+    token1 = auth1.token;
+    const auth2 = await getAuthToken(TEE_RPC_URL, player2);
+    token2 = auth2.token;
+    const authQ = await getAuthToken(TEE_RPC_URL, queueAuthority);
+    tokenQ = authQ.token;
 
-    // Create L1 providers for each player
-    providerL1Player1 = new anchor.AnchorProvider(provider.connection, new anchor.Wallet(player1), confirmOpts);
-    providerL1Player2 = new anchor.AnchorProvider(provider.connection, new anchor.Wallet(player2), confirmOpts);
-
-    // Authenticate and Create TEE Providers
-    token1 = await getAuthToken(TEE_RPC_URL, player1.publicKey, (msg) => Promise.resolve(nacl.sign.detached(msg, player1.secretKey)));
-    providerTeePlayer1 = new anchor.AnchorProvider(
-      new anchor.web3.Connection(`${TEE_RPC_URL}?token=${token1.token}`, { wsEndpoint: `${TEE_WS_URL}?token=${token1.token}` }),
-      new anchor.Wallet(player1),
-      confirmOpts
-    );
-    console.log("P1 Auth Token:", token1.token.slice(0, 10) + "...");
-
-    token2 = await getAuthToken(TEE_RPC_URL, player2.publicKey, (msg) => Promise.resolve(nacl.sign.detached(msg, player2.secretKey)));
-    providerTeePlayer2 = new anchor.AnchorProvider(
-      new anchor.web3.Connection(`${TEE_RPC_URL}?token=${token2.token}`, { wsEndpoint: `${TEE_WS_URL}?token=${token2.token}` }),
-      new anchor.Wallet(player2),
-      confirmOpts
-    );
-
-    tokenQ = await getAuthToken(TEE_RPC_URL, queueAuthority.publicKey, (msg) => Promise.resolve(nacl.sign.detached(msg, queueAuthority.secretKey)));
-    providerTeeQueueAuth = new anchor.AnchorProvider(
-      new anchor.web3.Connection(`${TEE_RPC_URL}?token=${tokenQ.token}`, { wsEndpoint: `${TEE_WS_URL}?token=${tokenQ.token}` }),
-      new anchor.Wallet(queueAuthority),
-      confirmOpts
-    );
+    console.log("P1 Auth Token:", token1.slice(0, 10) + "...");
   });
 
   it("Initialize Infrastructure (Tenant & Queue) & Delegate", async () => {
-    const mmAdmin = new MatchmakingAdmin(provider, privateMatchmaking.programId);
-
     // Compute Anchor discriminator for on_match_found
     const callbackDiscriminator = Array.from(
       crypto.createHash("sha256").update("global:on_match_found").digest().slice(0, 8)
     );
 
-    const skipPreflight = { skipPreflight: true, commitment: "confirmed" as const };
+    const mmAdmin = new MatchmakingAdmin(l1Rpc, queueAuthority, DUEL_PROGRAM_ID);
 
-    await mmAdmin.initializeTenant(
-      rpsGame.programId,
-      {
-        authority: queueAuthority.publicKey,
-        eloWindow: 100,
-        eloOffset: 8 + 32,
-        eloDataType: 'u64',
-        callbackProgramId: rpsGame.programId,
-        callbackDiscriminator,
-      },
-      skipPreflight,
-      [queueAuthority]
-    );
+    await mmAdmin.initializeTenant(RPS_GAME_PROGRAM_ID, {
+      authority: queueAuthority.address,
+      eloWindow: 100n,
+      eloOffset: 8 + 32,
+      eloDataType: "u64",
+      callbackProgramId: RPS_GAME_PROGRAM_ID,
+      callbackDiscriminator,
+    });
 
-    await mmAdmin.initializeQueue(
-      queueAuthority.publicKey,
-      tenantPda,
-      skipPreflight,
-      [queueAuthority]
-    );
+    await mmAdmin.initializeQueue(queueAuthority.address, tenantPda);
 
-    await mmAdmin.delegateQueue(
-      queueAuthority.publicKey,
-      ER_VALIDATOR,
-      skipPreflight,
-      [queueAuthority]
-    );
+    await mmAdmin.delegateQueue(queueAuthority.address, ER_VALIDATOR);
 
     console.log("Queue Initialized & Delegated (Dark Pool Active)");
 
     console.log("Waiting for Queue TEE activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${tokenQ.token}`, queuePda);
+    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${tokenQ}`, queuePda);
     console.log("Queue Active in TEE");
   });
 
   it("Initialize Player Profiles & Delegate", async () => {
-    // Initialize P1 Profile
-    await sendAndConfirmRobust(
-      rpsGame,
-      rpsGame.methods.initializePlayer().accounts({
-        player: player1.publicKey,
-        payer: player1.publicKey,
-      }).transaction(),
-      [player1]
-    );
-    await sendAndConfirmRobust(
-      rpsGame,
-      rpsGame.methods.delegatePda({ playerProfile: { player: player1.publicKey } }).accounts({
-        pda: p1ProfilePda,
-        payer: player1.publicKey,
-        validator: ER_VALIDATOR,
-      } as any).transaction(),
-      [player1]
-    );
-    console.log("Waiting for P1 Profile TEE activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1.token}`, p1ProfilePda);
+    // P1 profile
+    const initP1Ix = await getInitializePlayerInstructionAsync({
+      player: player1,
+      payer: player1,
+    });
+    await sendInstruction(l1Rpc, initP1Ix, player1);
 
-    // Initialize P2 Profile
-    await sendAndConfirmRobust(
-      rpsGame,
-      rpsGame.methods.initializePlayer().accounts({
-        player: player2.publicKey,
-        payer: player2.publicKey,
-      }).transaction(),
-      [player2]
-    );
-    await sendAndConfirmRobust(
-      rpsGame,
-      rpsGame.methods.delegatePda({ playerProfile: { player: player2.publicKey } }).accounts({
-        pda: p2ProfilePda,
-        payer: player2.publicKey,
-        validator: ER_VALIDATOR,
-      } as any).transaction(),
-      [player2]
-    );
+    const delegateP1Ix = await getDelegatePdaInstructionAsync({
+      pda: p1ProfilePda,
+      payer: player1,
+      validator: ER_VALIDATOR,
+      accountType: rpsAccountType("PlayerProfile", { player: player1.address }),
+    });
+    await sendInstruction(l1Rpc, delegateP1Ix, player1);
+
+    console.log("Waiting for P1 Profile TEE activation...");
+    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1}`, p1ProfilePda);
+
+    // P2 profile
+    const initP2Ix = await getInitializePlayerInstructionAsync({
+      player: player2,
+      payer: player2,
+    });
+    await sendInstruction(l1Rpc, initP2Ix, player2);
+
+    const delegateP2Ix = await getDelegatePdaInstructionAsync({
+      pda: p2ProfilePda,
+      payer: player2,
+      validator: ER_VALIDATOR,
+      accountType: rpsAccountType("PlayerProfile", { player: player2.address }),
+    });
+    await sendInstruction(l1Rpc, delegateP2Ix, player2);
+
     console.log("Waiting for P2 Profile TEE activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token2.token}`, p2ProfilePda);
+    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token2}`, p2ProfilePda);
 
     console.log("Profiles Initialized & Delegated");
   });
 
   it("P1 Creates Ticket, Delegates, and Joins Queue", async () => {
-    // 1. Create ticket on L1 (player-specific provider so player is the signer)
-    const clientP1L1 = new MatchmakingPlayer(providerL1Player1, privateMatchmaking.programId);
-    await clientP1L1.createTicket(tenantPda);
-    console.log("P1 Ticket Created on L1:", p1TicketPda.toBase58());
+    const clientP1 = new MatchmakingPlayer(l1Rpc, player1, DUEL_PROGRAM_ID);
 
-    // 2. Delegate ticket to TEE
-    await clientP1L1.delegateTicket(
-      player1.publicKey,
-      tenantPda,
-      ER_VALIDATOR,
-    );
+    await clientP1.createTicket(tenantPda);
+    console.log("P1 Ticket Created on L1:", p1TicketPda);
+
+    await clientP1.delegateTicket(player1.address, tenantPda, ER_VALIDATOR);
     console.log("P1 Ticket Delegated to TEE");
 
-    // Wait for ticket delegation
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1.token}`, p1TicketPda);
+    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1}`, p1TicketPda);
     console.log("P1 Ticket Active in TEE");
 
-    // 3. Join queue via TEE (player signs directly - no backend!)
-    const clientP1Tee = new MatchmakingPlayer(providerTeePlayer1, privateMatchmaking.programId);
-    await clientP1Tee.joinQueue(queuePda, tenantPda, p1ProfilePda);
-    console.log("P1 Joined Queue via TEE (Direct, No Backend!)");
+    const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
+    const clientP1Tee = new MatchmakingPlayer(teeRpc, player1, DUEL_PROGRAM_ID);
 
-    // Verify queue state in TEE
-    const mmP1 = await getMatchmakingProgram(player1, providerTeePlayer1);
-    const queueAccount = await mmP1.account.queue.fetch(queuePda);
-    console.log("Queue Entries (TEE):", queueAccount.entries.length);
-    assert.equal(queueAccount.entries.length, 1);
+    const joinSig1 = await clientP1Tee.joinQueue(queuePda, tenantPda, p1ProfilePda);
+    console.log("P1 Joined Queue sig:", joinSig1.slice(0, 20) + "...");
 
-    // PRIVACY CHECK: L1 should not see the entry
+    // Wait for TEE to process the transaction and check status
+    await new Promise(r => setTimeout(r, 3000));
+    const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
+    const adminTee = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
+    const queue = await adminTee.getQueue(queuePda);
+    console.log("Queue Entries (TEE via tokenQ):", queue.data.entries.length);
+    assert.equal(queue.data.entries.length, 1);
+
+    // Privacy check: L1 should not see the entry
     console.log("Checking L1 Privacy...");
     try {
-      const queueL1 = await privateMatchmaking.account.queue.fetch(queuePda);
-      if (queueL1.entries.length === 0) {
+      const adminL1 = new MatchmakingAdmin(l1Rpc, player1, DUEL_PROGRAM_ID);
+      const queueL1 = await adminL1.getQueue(queuePda);
+      if (queueL1.data.entries.length === 0) {
         console.log("PRIVACY CONFIRMED: L1 sees 0 entries.");
       } else {
         console.log("WARNING: L1 sees entries! State might be leaking.");
       }
-    } catch (e) {
+    } catch {
       console.log("PRIVACY CONFIRMED: L1 could not fetch account (Delegated/Locked).");
     }
   });
 
   it("P2 Creates Ticket, Delegates, Joins Queue -> Auto-Match", async () => {
-    // 1. Create ticket on L1 (player-specific provider so player is the signer)
-    const clientP2L1 = new MatchmakingPlayer(providerL1Player2, privateMatchmaking.programId);
-    await clientP2L1.createTicket(tenantPda);
-    console.log("P2 Ticket Created on L1:", p2TicketPda.toBase58());
+    const clientP2 = new MatchmakingPlayer(l1Rpc, player2, DUEL_PROGRAM_ID);
 
-    // 2. Delegate ticket to TEE
-    await clientP2L1.delegateTicket(
-      player2.publicKey,
-      tenantPda,
-      ER_VALIDATOR,
-    );
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token2.token}`, p2TicketPda);
+    await clientP2.createTicket(tenantPda);
+    console.log("P2 Ticket Created on L1:", p2TicketPda);
+
+    await clientP2.delegateTicket(player2.address, tenantPda, ER_VALIDATOR);
+
+    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token2}`, p2TicketPda);
     console.log("P2 Ticket Active in TEE");
 
-    // 3. Join queue via TEE - this should trigger auto-match
-    const clientP2Tee = new MatchmakingPlayer(providerTeePlayer2, privateMatchmaking.programId);
-    await clientP2Tee.joinQueue(queuePda, tenantPda, p2ProfilePda);
-    console.log("P2 Joined Queue via TEE (Direct, No Backend!)");
+    const teeRpc2 = createSolanaRpc(`${TEE_RPC_URL}?token=${token2}`);
+    const clientP2Tee = new MatchmakingPlayer(teeRpc2, player2, DUEL_PROGRAM_ID);
 
-    // Verify match happened
-    const mmP2 = await getMatchmakingProgram(player2, providerTeePlayer2);
-    const queueAccount = await mmP2.account.queue.fetch(queuePda);
-    console.log("Queue Entries (After Auto-Match):", queueAccount.entries.length);
-    assert.equal(queueAccount.entries.length, 0, "Queue should be empty after match");
+    const joinSig2 = await clientP2Tee.joinQueue(queuePda, tenantPda, p2ProfilePda);
+    console.log("P2 Joined Queue sig:", joinSig2.slice(0, 20) + "...");
 
-    // P2's ticket should be updated to Matched (they were the joining player)
-    const p2Ticket = await mmP2.account.matchTicket.fetch(p2TicketPda);
-    console.log("P2 Ticket Status:", JSON.stringify(p2Ticket.status));
-    assert.ok(p2Ticket.status.matched, "P2 ticket should be in Matched status");
+    // Wait for TEE to process and check status
+    await new Promise(r => setTimeout(r, 3000));
+    const teeRpcQ2 = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
+    const adminTee2 = new MatchmakingAdmin(teeRpcQ2, queueAuthority, DUEL_PROGRAM_ID);
+    const queue = await adminTee2.getQueue(queuePda);
+    console.log("Queue Entries (After Auto-Match):", queue.data.entries.length);
+    assert.equal(queue.data.entries.length, 0, "Queue should be empty after match");
 
-    // P1's ticket should have a pending match
-    console.log("Pending matches:", queueAccount.pendingMatches.length);
-    assert.equal(queueAccount.pendingMatches.length, 1, "Should have 1 pending match for P1");
+    const p2TicketRes = await clientP2Tee.getTicket(p2TicketPda);
+    assert.ok(p2TicketRes.exists, "P2 ticket should exist");
+    const p2Status = p2TicketRes.data.status;
+    console.log("P2 Ticket Status:", JSON.stringify(p2Status, (_, v) => typeof v === "bigint" ? v.toString() : v));
+    assert.equal(p2Status.__kind, "Matched", "P2 ticket should be in Matched status");
+
+    console.log("Pending matches:", queue.data.pendingMatches.length);
+    assert.equal(queue.data.pendingMatches.length, 1, "Should have 1 pending match for P1");
   });
 
   it("Flush Matches - Update P1's Ticket", async () => {
-    const mmAdmin = new MatchmakingAdmin(providerTeeQueueAuth, privateMatchmaking.programId);
+    const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
+    const mmAdmin = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
 
-    // Flush pending matches (permissionless crank) — with CPI callback
-    await mmAdmin.flushMatches(
-      queuePda,
-      tenantPda,
-      [p1TicketPda],  // P1's ticket needs updating
-      rpsGame.programId,  // callback program
-    );
+    await mmAdmin.flushMatches(queuePda, tenantPda, [p1TicketPda], RPS_GAME_PROGRAM_ID);
     console.log("Flushed pending matches");
+    await new Promise(r => setTimeout(r, 3000));
 
-    // Verify P1's ticket is now Matched
-    const mmP1 = await getMatchmakingProgram(player1, providerTeePlayer1);
-    const p1Ticket = await mmP1.account.matchTicket.fetch(p1TicketPda);
-    console.log("P1 Ticket Status:", JSON.stringify(p1Ticket.status));
-    assert.ok(p1Ticket.status.matched, "P1 ticket should be in Matched status");
+    const teeRpc1 = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
+    const clientP1Tee = new MatchmakingPlayer(teeRpc1, player1, DUEL_PROGRAM_ID);
+    const p1TicketRes = await clientP1Tee.getTicket(p1TicketPda);
+    assert.ok(p1TicketRes.exists, "P1 ticket should exist");
+    const p1Status = p1TicketRes.data.status;
+    console.log("P1 Ticket Status:", JSON.stringify(p1Status, (_, v) => typeof v === "bigint" ? v.toString() : v));
+    assert.equal(p1Status.__kind, "Matched", "P1 ticket should be in Matched status");
 
-    // Verify no more pending matches
-    const queueAccount = await mmP1.account.queue.fetch(queuePda);
-    assert.equal(queueAccount.pendingMatches.length, 0, "No more pending matches");
+    const queue = await mmAdmin.getQueue(queuePda);
+    assert.equal(queue.data.pendingMatches.length, 0, "No more pending matches");
   });
 
   it("Commit Tickets to L1", async () => {
-    const mmAdmin = new MatchmakingAdmin(providerTeeQueueAuth, privateMatchmaking.programId);
+    const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
+    const mmAdmin = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
 
-    // Commit both tickets back to L1
-    await mmAdmin.commitTickets(
-      tenantPda,
-      [p1TicketPda, p2TicketPda],
-    );
+    await mmAdmin.commitTickets(tenantPda, [p1TicketPda, p2TicketPda]);
     console.log("Committed both tickets to L1");
 
-    // Verify tickets are readable on L1 with correct match data
-    // Need to wait a moment for L1 state to settle
-    await new Promise(r => setTimeout(r, 5000));
+    // Wait for L1 to settle
+    await new Promise((r) => setTimeout(r, 5000));
 
-    const p1Ticket = await privateMatchmaking.account.matchTicket.fetch(p1TicketPda);
-    const p2Ticket = await privateMatchmaking.account.matchTicket.fetch(p2TicketPda);
+    const clientP1 = new MatchmakingPlayer(l1Rpc, player1, DUEL_PROGRAM_ID);
+    const clientP2 = new MatchmakingPlayer(l1Rpc, player2, DUEL_PROGRAM_ID);
 
-    console.log("P1 Ticket (L1):", JSON.stringify(p1Ticket.status));
-    console.log("P2 Ticket (L1):", JSON.stringify(p2Ticket.status));
+    const p1Res = await clientP1.getTicket(p1TicketPda);
+    const p2Res = await clientP2.getTicket(p2TicketPda);
 
-    assert.ok(p1Ticket.status.matched, "P1 ticket should be Matched on L1");
-    assert.ok(p2Ticket.status.matched, "P2 ticket should be Matched on L1");
+    assert.ok(p1Res.exists, "P1 ticket should exist on L1");
+    assert.ok(p2Res.exists, "P2 ticket should exist on L1");
 
-    // Verify correct opponents
-    if (p1Ticket.status.matched) {
-      assert.ok(
-        p1Ticket.status.matched.opponent.equals(player2.publicKey),
-        "P1's opponent should be P2"
-      );
+    const bigIntReplacer = (_: string, v: unknown) => typeof v === "bigint" ? v.toString() : v;
+    console.log("P1 Ticket (L1):", JSON.stringify(p1Res.data.status, bigIntReplacer));
+    console.log("P2 Ticket (L1):", JSON.stringify(p2Res.data.status, bigIntReplacer));
+
+    assert.equal(p1Res.data.status.__kind, "Matched", "P1 ticket should be Matched on L1");
+    assert.equal(p2Res.data.status.__kind, "Matched", "P2 ticket should be Matched on L1");
+
+    if (p1Res.data.status.__kind === "Matched") {
+      assert.equal(p1Res.data.status.opponent, player2.address, "P1's opponent should be P2");
     }
-    if (p2Ticket.status.matched) {
-      assert.ok(
-        p2Ticket.status.matched.opponent.equals(player1.publicKey),
-        "P2's opponent should be P1"
-      );
+    if (p2Res.data.status.__kind === "Matched") {
+      assert.equal(p2Res.data.status.opponent, player1.address, "P2's opponent should be P1");
     }
 
     console.log("L1 Ticket verification complete - match data correct!");
   });
 
   it("Play Game (Start & Moves)", async () => {
-    const gameId = new BN(1);
-    const gameSessionSeed = Buffer.from("game_session_v1");
+    const gameId = 1n;
 
-    const [gameSessionPda] = web3.PublicKey.findProgramAddressSync(
-      [
-        gameSessionSeed,
-        player1.publicKey.toBuffer(),
-        player2.publicKey.toBuffer(),
-        gameId.toArrayLike(Buffer, 'le', 8)
+    // Encode gameId as LE uint64
+    const gameIdBytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) {
+      gameIdBytes[i] = Number((gameId >> BigInt(i * 8)) & 0xffn);
+    }
+
+    const [gameSessionPda] = await getProgramDerivedAddress({
+      programAddress: RPS_GAME_PROGRAM_ID,
+      seeds: [
+        utf8Encoder.encode("game_session_v1"),
+        addressEncoder.encode(player1.address),
+        addressEncoder.encode(player2.address),
+        gameIdBytes,
       ],
-      rpsGame.programId
-    );
+    });
 
-    // Start game (use secure verification via ticket)
-    await sendAndConfirmRobust(rpsGame, rpsGame.methods.startGameWithTicket(gameId, player2.publicKey).accounts({
-      player: player1.publicKey,
+    // Start game with ticket verification
+    const startIx = await getStartGameWithTicketInstructionAsync({
+      player: player1,
       matchTicket: p1TicketPda,
-    } as any).transaction(), [player1]);
+      gameId,
+      opponent: player2.address,
+    });
+    await sendInstruction(l1Rpc, startIx, player1);
 
-    // Delegate Game Session
-    await sendAndConfirmRobust(rpsGame, rpsGame.methods.delegatePda({
-      gameSession: { p1: player1.publicKey, p2: player2.publicKey, id: gameId }
-    }).accounts({
+    // Delegate game session to TEE
+    const delegateGameIx = await getDelegatePdaInstructionAsync({
       pda: gameSessionPda,
-      payer: player1.publicKey,
+      payer: player1,
       validator: ER_VALIDATOR,
-    } as any).transaction(), [player1]);
+      accountType: rpsAccountType("GameSession", {
+        p1: player1.address,
+        p2: player2.address,
+        id: gameId,
+      }),
+    });
+    await sendInstruction(l1Rpc, delegateGameIx, player1);
 
     console.log("Game Session Started & Delegated. Waiting for activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1.token}`, gameSessionPda);
+    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1}`, gameSessionPda);
 
-    // P1 Moves (Rock) - TEE
-    const rpsP1 = await getTeeProgram(player1, providerTeePlayer1);
-    await sendAndConfirmRobust(rpsP1, rpsP1.methods.makeChoice({ rock: {} }).accountsPartial({
+    // P1 chooses Rock via TEE
+    const teeRpc1 = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
+    const rockIx = getMakeChoiceInstruction({
       gameSession: gameSessionPda,
       player1Profile: p1ProfilePda,
       player2Profile: p2ProfilePda,
-      player: player1.publicKey,
-    }).transaction(), [player1]);
+      player: player1,
+      choice: Choice.Rock,
+    });
+    await sendInstruction(teeRpc1, rockIx, player1);
     console.log("P1 Chose Rock");
 
-    // P2 Moves (Paper) - TEE
-    const rpsP2 = await getTeeProgram(player2, providerTeePlayer2);
-    await sendAndConfirmRobust(rpsP2, rpsP2.methods.makeChoice({ paper: {} }).accountsPartial({
+    // P2 chooses Paper via TEE
+    const teeRpc2 = createSolanaRpc(`${TEE_RPC_URL}?token=${token2}`);
+    const paperIx = getMakeChoiceInstruction({
       gameSession: gameSessionPda,
       player1Profile: p1ProfilePda,
       player2Profile: p2ProfilePda,
-      player: player2.publicKey,
-    }).transaction(), [player2]);
+      player: player2,
+      choice: Choice.Paper,
+    });
+    await sendInstruction(teeRpc2, paperIx, player2);
     console.log("P2 Chose Paper");
 
-    // Persist Results
-    await sendAndConfirmRobust(
-      rpsP1,
-      rpsP1.methods.persistResults().accountsPartial({
-        gameSession: gameSessionPda,
-        player1Profile: p1ProfilePda,
-        player2Profile: p2ProfilePda,
-        payer: player1.publicKey,
-      }).transaction(),
-      [player1]
-    );
+    // Persist results via TEE
+    const persistIx = getPersistResultsInstruction({
+      gameSession: gameSessionPda,
+      player1Profile: p1ProfilePda,
+      player2Profile: p2ProfilePda,
+      payer: player1,
+    });
+    await sendInstruction(teeRpc1, persistIx, player1);
     console.log("Results Persisted");
 
-    // Verify Result
-    const sessionAccount = await rpsGame.account.gameSession.fetch(gameSessionPda);
-    console.log("Game Result:", JSON.stringify(sessionAccount.result));
+    // Verify result on TEE
+    const session = await fetchGameSession(teeRpc1, gameSessionPda);
+    console.log("Game Result:", JSON.stringify(session.data.result, (_, v) => typeof v === "bigint" ? v.toString() : v));
 
-    const winnerObj = sessionAccount.result as any;
-    let winnerPk: web3.PublicKey | null = null;
-    if (winnerObj.winner) {
-      if (winnerObj.winner instanceof web3.PublicKey) {
-        winnerPk = winnerObj.winner;
-      } else if (winnerObj.winner['0']) {
-        winnerPk = new web3.PublicKey(winnerObj.winner['0']);
-      } else if (Array.isArray(winnerObj.winner) && winnerObj.winner[0]) {
-        winnerPk = new web3.PublicKey(winnerObj.winner[0]);
-      }
+    const result = session.data.result;
+    if (result.__kind === "Winner") {
+      assert.equal(result.fields[0], player2.address, "P2 should win");
     }
 
-    if (winnerPk) {
-      assert.ok(winnerPk.equals(player2.publicKey), "P2 should win");
-    }
+    // Check ELO on TEE (profiles are still delegated)
+    const p1Profile = await fetchPlayerProfile(teeRpc1, p1ProfilePda);
+    const p2Profile = await fetchPlayerProfile(teeRpc2, p2ProfilePda);
 
-    // Check ELO
-    const p1Profile = await rpsGame.account.playerProfile.fetch(p1ProfilePda);
-    const p2Profile = await rpsGame.account.playerProfile.fetch(p2ProfilePda);
+    console.log(`P1 ELO (Loser 1000->${p1Profile.data.elo}): ${p1Profile.data.elo}`);
+    console.log(`P2 ELO (Winner 1000->${p2Profile.data.elo}): ${p2Profile.data.elo}`);
 
-    console.log(`P1 ELO (Loser 1000->${p1Profile.elo}): ${p1Profile.elo}`);
-    console.log(`P2 ELO (Winner 1000->${p2Profile.elo}): ${p2Profile.elo}`);
-
-    assert.ok(p1Profile.elo.lt(new BN(1000)), "P1 ELO should decrease");
-    assert.ok(p2Profile.elo.gt(new BN(1000)), "P2 ELO should increase");
+    assert.ok(p1Profile.data.elo < 1000n, "P1 ELO should decrease");
+    assert.ok(p2Profile.data.elo > 1000n, "P2 ELO should increase");
   });
 
   it("Third-party can read MatchTicket PDA on L1 to verify match", async () => {
-    // Derive ticket PDAs the same way a third-party would
-    const [derivedP1Ticket] = web3.PublicKey.findProgramAddressSync(
-      [ticketSeed, player1.publicKey.toBuffer(), tenantPda.toBuffer()],
-      privateMatchmaking.programId
-    );
+    const [derivedP1Ticket] = await getProgramDerivedAddress({
+      programAddress: DUEL_PROGRAM_ID,
+      seeds: [
+        utf8Encoder.encode("ticket"),
+        addressEncoder.encode(player1.address),
+        addressEncoder.encode(tenantPda),
+      ],
+    });
 
-    // Fetch and verify - this proves any program can read ticket state
-    const ticket = await privateMatchmaking.account.matchTicket.fetch(derivedP1Ticket);
+    const clientAny = new MatchmakingPlayer(l1Rpc, player1, DUEL_PROGRAM_ID);
+    const ticketRes = await clientAny.getTicket(derivedP1Ticket);
 
-    assert.ok(ticket.player.equals(player1.publicKey), "Ticket player should match");
-    assert.ok(ticket.tenant.equals(tenantPda), "Ticket tenant should match");
-    assert.ok(ticket.status.matched, "Ticket should show matched status");
+    assert.ok(ticketRes.exists, "Ticket should exist");
+    const ticket = ticketRes.data;
+    assert.equal(ticket.player, player1.address, "Ticket player should match");
+    assert.equal(ticket.tenant, tenantPda, "Ticket tenant should match");
+    assert.equal(ticket.status.__kind, "Matched", "Ticket should show matched status");
 
     console.log("Third-party verification successful:");
-    console.log("  Player:", ticket.player.toBase58());
-    console.log("  Tenant:", ticket.tenant.toBase58());
-    console.log("  Status:", JSON.stringify(ticket.status));
+    console.log("  Player:", ticket.player);
+    console.log("  Tenant:", ticket.tenant);
+    console.log("  Status:", JSON.stringify(ticket.status, (_, v) => typeof v === "bigint" ? v.toString() : v));
   });
 
   after("Cleanup", async () => {
     // Delegated accounts cannot be closed easily by the original owner program.
-    // In production, we would undelegate first before closing.
   });
 });

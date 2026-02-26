@@ -2,18 +2,20 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import { Program } from "@coral-xyz/anchor";
 import { useWalletContext } from "@/lib/contexts/WalletContext";
-import { connectionAtom } from "@/lib/atoms/program";
+import { rpcAtom } from "@/lib/atoms/program";
 import { playerProfileAtom, playerProfilePdaAtom, hasProfileAtom } from "@/lib/atoms/player";
-import { RPS_GAME_PROGRAM_ID } from "@/lib/constants";
-import { createL1Provider } from "@/lib/utils/tee";
-import type { RpsGame } from "@/lib/types/rps_game_idl";
-import IDL from "@/lib/types/rps_game.json";
+import { walletToSigner } from "@/lib/utils/wallet-bridge";
+import { sendInstruction } from "@/lib/utils/transaction";
+import type { PlayerProfile } from "@/lib/types/rps";
+import {
+  fetchMaybePlayerProfile,
+  getInitializePlayerInstructionAsync,
+} from "@sdk/generated/rps-game";
 
 export function usePlayerProfile() {
-  const { publicKey, anchorWallet } = useWalletContext();
-  const connection = useAtomValue(connectionAtom);
+  const { publicKey, kitWallet } = useWalletContext();
+  const rpc = useAtomValue(rpcAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
   const [profile, setProfile] = useAtom(playerProfileAtom);
   const hasProfile = useAtomValue(hasProfileAtom);
@@ -22,7 +24,7 @@ export function usePlayerProfile() {
 
   // Fetch profile data
   useEffect(() => {
-    if (!profilePda || !publicKey || !anchorWallet) {
+    if (!profilePda || !publicKey) {
       setProfile(null);
       return;
     }
@@ -31,31 +33,31 @@ export function usePlayerProfile() {
 
     const fetchProfile = async () => {
       try {
-        const provider = createL1Provider(connection, anchorWallet);
-        const program = new Program(IDL as any, provider) as Program<RpsGame>;
-
-        const profileData = await program.account.playerProfile.fetch(profilePda);
+        const maybeAccount = await fetchMaybePlayerProfile(rpc, profilePda);
         if (isMounted) {
-          setProfile(profileData as any);
+          if (maybeAccount.exists) {
+            setProfile({
+              player: maybeAccount.data.player,
+              elo: maybeAccount.data.elo,
+              gamesPlayed: maybeAccount.data.gamesPlayed,
+              gamesWon: maybeAccount.data.gamesWon,
+            } satisfies PlayerProfile);
+          } else {
+            setProfile(null);
+          }
         }
-      } catch (err) {
-        // Profile doesn't exist yet
-        if (isMounted) {
-          setProfile(null);
-        }
+      } catch {
+        if (isMounted) setProfile(null);
       }
     };
 
     fetchProfile();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [profilePda, publicKey, connection, anchorWallet]);
+    return () => { isMounted = false; };
+  }, [profilePda, publicKey, rpc, setProfile]);
 
   // Initialize profile
-  const initializeProfile = async () => {
-    if (!publicKey || !anchorWallet) {
+  const initializeProfile = useCallback(async () => {
+    if (!publicKey || !kitWallet || !profilePda) {
       throw new Error("Wallet not connected");
     }
 
@@ -63,27 +65,31 @@ export function usePlayerProfile() {
     setError(null);
 
     try {
-      const provider = createL1Provider(connection, anchorWallet);
-      const program = new Program(IDL as any, provider) as Program<RpsGame>;
+      const signer = walletToSigner(kitWallet);
+      const ix = await getInitializePlayerInstructionAsync({
+        player: signer,
+        payer: signer,
+      });
 
-      await program.methods
-        .initializePlayer()
-        .accounts({
-          player: publicKey,
-          payer: publicKey,
-        })
-        .rpc();
+      await sendInstruction(rpc, ix, kitWallet);
 
       // Refresh profile
-      const profileData = await program.account.playerProfile.fetch(profilePda!);
-      setProfile(profileData as any);
+      const account = await fetchMaybePlayerProfile(rpc, profilePda);
+      if (account.exists) {
+        setProfile({
+          player: account.data.player,
+          elo: account.data.elo,
+          gamesPlayed: account.data.gamesPlayed,
+          gamesWon: account.data.gamesWon,
+        });
+      }
     } catch (err: any) {
       setError(err.message || "Failed to create profile");
       throw err;
     } finally {
       setLoading(false);
     }
-  };
+  }, [publicKey, kitWallet, profilePda, rpc, setProfile]);
 
   return {
     profile,

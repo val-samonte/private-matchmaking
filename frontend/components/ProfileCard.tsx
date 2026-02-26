@@ -10,8 +10,8 @@ export function ProfileCard() {
     return null;
   }
 
-  const winRate = profile.gamesPlayed.toNumber() > 0
-    ? ((profile.gamesWon.toNumber() / profile.gamesPlayed.toNumber()) * 100).toFixed(1)
+  const winRate = profile.gamesPlayed > 0n
+    ? ((Number(profile.gamesWon) / Number(profile.gamesPlayed)) * 100).toFixed(1)
     : "0.0";
 
   return (
