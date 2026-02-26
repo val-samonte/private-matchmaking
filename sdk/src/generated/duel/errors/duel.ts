@@ -21,14 +21,12 @@ export const DUEL_ERROR__INVALID_ELO_SIZE = 0x1773; // 6003
 export const DUEL_ERROR__INVALID_TICKET_STATUS = 0x1774; // 6004
 /** InvalidTicketAccount: Invalid ticket account */
 export const DUEL_ERROR__INVALID_TICKET_ACCOUNT = 0x1775; // 6005
-/** MissingCallbackProgram: Missing or invalid callback program in remaining accounts */
-export const DUEL_ERROR__MISSING_CALLBACK_PROGRAM = 0x1776; // 6006
 
-export type DuelError = typeof DUEL_ERROR__DATA_TOO_SMALL | typeof DUEL_ERROR__INVALID_ELO_SIZE | typeof DUEL_ERROR__INVALID_TENANT | typeof DUEL_ERROR__INVALID_TICKET_ACCOUNT | typeof DUEL_ERROR__INVALID_TICKET_STATUS | typeof DUEL_ERROR__MISSING_CALLBACK_PROGRAM | typeof DUEL_ERROR__UNAUTHORIZED;
+export type DuelError = typeof DUEL_ERROR__DATA_TOO_SMALL | typeof DUEL_ERROR__INVALID_ELO_SIZE | typeof DUEL_ERROR__INVALID_TENANT | typeof DUEL_ERROR__INVALID_TICKET_ACCOUNT | typeof DUEL_ERROR__INVALID_TICKET_STATUS | typeof DUEL_ERROR__UNAUTHORIZED;
 
 let duelErrorMessages: Record<DuelError, string> | undefined;
 if (process.env.NODE_ENV !== 'production') {
-  duelErrorMessages = { [DUEL_ERROR__DATA_TOO_SMALL]: `Account data too small for ELO read`, [DUEL_ERROR__INVALID_ELO_SIZE]: `Invalid ELO size (must be 1, 2, 4, or 8 bytes)`, [DUEL_ERROR__INVALID_TENANT]: `Account does not belong to the specified Tenant Program`, [DUEL_ERROR__INVALID_TICKET_ACCOUNT]: `Invalid ticket account`, [DUEL_ERROR__INVALID_TICKET_STATUS]: `Invalid ticket status for this operation`, [DUEL_ERROR__MISSING_CALLBACK_PROGRAM]: `Missing or invalid callback program in remaining accounts`, [DUEL_ERROR__UNAUTHORIZED]: `Unauthorized access` };
+  duelErrorMessages = { [DUEL_ERROR__DATA_TOO_SMALL]: `Account data too small for ELO read`, [DUEL_ERROR__INVALID_ELO_SIZE]: `Invalid ELO size (must be 1, 2, 4, or 8 bytes)`, [DUEL_ERROR__INVALID_TENANT]: `Account does not belong to the specified Tenant Program`, [DUEL_ERROR__INVALID_TICKET_ACCOUNT]: `Invalid ticket account`, [DUEL_ERROR__INVALID_TICKET_STATUS]: `Invalid ticket status for this operation`, [DUEL_ERROR__UNAUTHORIZED]: `Unauthorized access` };
 }
 
 export function getDuelErrorMessage(code: DuelError): string {

@@ -8,7 +8,7 @@
 import { type Address, type ClientWithPayer, type ClientWithRpc, type ClientWithTransactionPlanning, type ClientWithTransactionSending, type GetAccountInfoApi, type GetMultipleAccountsApi, type Instruction, type InstructionWithData, type ReadonlyUint8Array } from '@solana/kit';
 import { type SelfFetchFunctions, type SelfPlanAndSendFunctions } from '@solana/program-client-core';
 import { getMatchTicketCodec, getQueueCodec, getTenantCodec, type MatchTicket, type MatchTicketArgs, type Queue, type QueueArgs, type Tenant, type TenantArgs } from '../accounts';
-import { getCancelTicketInstructionAsync, getCloseTicketInstructionAsync, getCommitTicketsInstruction, getCreateTicketInstructionAsync, getDelegateQueueInstructionAsync, getDelegateTicketInstructionAsync, getFlushMatchesInstruction, getInitializeQueueInstructionAsync, getInitializeTenantInstructionAsync, getJoinQueueInstructionAsync, getProcessUndelegationInstruction, type CancelTicketAsyncInput, type CloseTicketAsyncInput, type CommitTicketsInput, type CreateTicketAsyncInput, type DelegateQueueAsyncInput, type DelegateTicketAsyncInput, type FlushMatchesInput, type InitializeQueueAsyncInput, type InitializeTenantAsyncInput, type JoinQueueAsyncInput, type ParsedCancelTicketInstruction, type ParsedCloseTicketInstruction, type ParsedCommitTicketsInstruction, type ParsedCreateTicketInstruction, type ParsedDelegateQueueInstruction, type ParsedDelegateTicketInstruction, type ParsedFlushMatchesInstruction, type ParsedInitializeQueueInstruction, type ParsedInitializeTenantInstruction, type ParsedJoinQueueInstruction, type ParsedProcessUndelegationInstruction, type ProcessUndelegationInput } from '../instructions';
+import { getCancelTicketInstructionAsync, getCloseTicketInstructionAsync, getCommitTicketsInstruction, getCreateTicketInstructionAsync, getDelegateQueueInstructionAsync, getDelegateTicketInstructionAsync, getFlushMatchesInstruction, getInitializeQueueInstructionAsync, getInitializeTenantInstructionAsync, getJoinQueueInstructionAsync, getProcessUndelegationInstruction, getSetupTicketPermissionInstructionAsync, type CancelTicketAsyncInput, type CloseTicketAsyncInput, type CommitTicketsInput, type CreateTicketAsyncInput, type DelegateQueueAsyncInput, type DelegateTicketAsyncInput, type FlushMatchesInput, type InitializeQueueAsyncInput, type InitializeTenantAsyncInput, type JoinQueueAsyncInput, type ParsedCancelTicketInstruction, type ParsedCloseTicketInstruction, type ParsedCommitTicketsInstruction, type ParsedCreateTicketInstruction, type ParsedDelegateQueueInstruction, type ParsedDelegateTicketInstruction, type ParsedFlushMatchesInstruction, type ParsedInitializeQueueInstruction, type ParsedInitializeTenantInstruction, type ParsedJoinQueueInstruction, type ParsedProcessUndelegationInstruction, type ParsedSetupTicketPermissionInstruction, type ProcessUndelegationInput, type SetupTicketPermissionAsyncInput } from '../instructions';
 export declare const DUEL_PROGRAM_ADDRESS: Address<"EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X">;
 export declare enum DuelAccount {
     MatchTicket = 0,
@@ -29,7 +29,8 @@ export declare enum DuelInstruction {
     InitializeQueue = 7,
     InitializeTenant = 8,
     JoinQueue = 9,
-    ProcessUndelegation = 10
+    ProcessUndelegation = 10,
+    SetupTicketPermission = 11
 }
 export declare function identifyDuelInstruction(instruction: {
     data: ReadonlyUint8Array;
@@ -56,7 +57,9 @@ export type ParsedDuelInstruction<TProgram extends string = 'EdZzUwKd1X2ZWjxLPpz
     instructionType: DuelInstruction.JoinQueue;
 } & ParsedJoinQueueInstruction<TProgram> | {
     instructionType: DuelInstruction.ProcessUndelegation;
-} & ParsedProcessUndelegationInstruction<TProgram>;
+} & ParsedProcessUndelegationInstruction<TProgram> | {
+    instructionType: DuelInstruction.SetupTicketPermission;
+} & ParsedSetupTicketPermissionInstruction<TProgram>;
 export declare function parseDuelInstruction<TProgram extends string>(instruction: Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array>): ParsedDuelInstruction<TProgram>;
 export type DuelPlugin = {
     accounts: DuelPluginAccounts;
@@ -79,6 +82,7 @@ export type DuelPluginInstructions = {
     initializeTenant: (input: InitializeTenantAsyncInput) => ReturnType<typeof getInitializeTenantInstructionAsync> & SelfPlanAndSendFunctions;
     joinQueue: (input: JoinQueueAsyncInput) => ReturnType<typeof getJoinQueueInstructionAsync> & SelfPlanAndSendFunctions;
     processUndelegation: (input: MakeOptional<ProcessUndelegationInput, "payer">) => ReturnType<typeof getProcessUndelegationInstruction> & SelfPlanAndSendFunctions;
+    setupTicketPermission: (input: SetupTicketPermissionAsyncInput) => ReturnType<typeof getSetupTicketPermissionInstructionAsync> & SelfPlanAndSendFunctions;
 };
 export type DuelPluginRequirements = ClientWithRpc<GetAccountInfoApi & GetMultipleAccountsApi> & ClientWithPayer & ClientWithTransactionPlanning & ClientWithTransactionSending;
 export declare function duelProgram(): <T extends DuelPluginRequirements>(client: T) => T & {

@@ -65,10 +65,10 @@ if (!accounts.bufferPda.value) {
 accounts.bufferPda.value = await getProgramDerivedAddress({ programAddress: 'EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X' as Address<'EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X'>, seeds: [getBytesEncoder().encode(new Uint8Array([98, 117, 102, 102, 101, 114])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("pda", accounts.pda.value))] });
 }
 if (!accounts.delegationRecordPda.value) {
-accounts.delegationRecordPda.value = await getProgramDerivedAddress({ programAddress: 'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh' as Address<'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh'>, seeds: [getBytesEncoder().encode(new Uint8Array([100, 101, 108, 101, 103, 97, 116, 105, 111, 110])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("pda", accounts.pda.value))] });
+accounts.delegationRecordPda.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([100, 101, 108, 101, 103, 97, 116, 105, 111, 110])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("pda", accounts.pda.value))] });
 }
 if (!accounts.delegationMetadataPda.value) {
-accounts.delegationMetadataPda.value = await getProgramDerivedAddress({ programAddress: 'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh' as Address<'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh'>, seeds: [getBytesEncoder().encode(new Uint8Array([100, 101, 108, 101, 103, 97, 116, 105, 111, 110, 45, 109, 101, 116, 97, 100, 97, 116, 97])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("pda", accounts.pda.value))] });
+accounts.delegationMetadataPda.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([100, 101, 108, 101, 103, 97, 116, 105, 111, 110, 45, 109, 101, 116, 97, 100, 97, 116, 97])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("pda", accounts.pda.value))] });
 }
 if (!accounts.ownerProgram.value) {
 accounts.ownerProgram.value = 'EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X' as Address<'EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X'>;

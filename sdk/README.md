@@ -1,13 +1,8 @@
 # @1upmonster/duel
 
-TypeScript SDK for **Duel** - a privacy-focused matchmaking protocol on Solana using MagicBlock's Ephemeral Rollups (TEE).
+TypeScript SDK for **Duel** — a privacy-preserving matchmaking protocol on Solana using MagicBlock Ephemeral Rollups (TEE).
 
-## Features
-
-- **Privacy-First**: Player ELO and queue status hidden in TEE
-- **Client-Side**: Players join queues directly from their wallets (no CPI required)
-- **Automatic Matching**: TEE processes matches based on ELO windows
-- **Easy Integration**: Simple SDK for both game owners and players
+Built on [`@solana/kit`](https://github.com/anza-xyz/kit). No `@coral-xyz/anchor` or legacy `web3.js` dependency.
 
 ## Installation
 
@@ -17,85 +12,141 @@ npm install @1upmonster/duel
 
 ## Quick Start
 
-### For Game Owners
-
-Initialize matchmaking infrastructure for your game:
+### For Game Owners (`MatchmakingAdmin`)
 
 ```typescript
 import { MatchmakingAdmin } from "@1upmonster/duel";
-import { AnchorProvider } from "@coral-xyz/anchor";
+import { createSolanaRpc, createKeyPairSignerFromBytes } from "@solana/kit";
+import * as crypto from "crypto";
 
-const admin = new MatchmakingAdmin(provider);
+const rpc = createSolanaRpc("https://api.devnet.solana.com");
+const signer = await createKeyPairSignerFromBytes(/* your keypair bytes */);
+const admin = new MatchmakingAdmin(rpc, signer);
 
-// 1. Initialize Tenant for your Game Program
-await admin.initializeTenant(gameProgramId, {
-  authority,      // optional, defaults to gameProgramId
-  eloWindow: 200, // optional, default 100
-  eloOffset: 40,  // optional, default 40
-  eloDataType: 'u16' // optional, default 'u16' (u8/u16/u32/u64)
+// 1. Initialize Tenant — stores callback config on L1
+const callbackDiscriminator = Array.from(
+  crypto.createHash("sha256").update("global:on_match_found").digest().slice(0, 8)
+);
+await admin.initializeTenant(YOUR_GAME_PROGRAM_ID, {
+  eloWindow: 100n,       // max ELO diff for a match
+  eloOffset: 40,         // byte offset of ELO in player account
+  eloDataType: "u64",    // u8 | u16 | u32 | u64
+  callbackProgramId: YOUR_GAME_PROGRAM_ID,
+  callbackDiscriminator,
 });
 
-// 2. Initialize a Matchmaking Queue
-const tenantPda = admin.getTenantPda(authority);
+// 2. Create and delegate queue to TEE
+const authority = signer.address;
 await admin.initializeQueue(authority, tenantPda);
-
-// 3. Delegate to TEE Validator
 await admin.delegateQueue(authority, validatorPubkey);
+
+// 3. After players have matched, flush opponent tickets + commit all to L1
+await admin.resolveMatches(queuePda, tenantPda, [p1TicketPda, p2TicketPda]);
 ```
 
-### ELO Data Types
-
-The SDK supports different ELO data types to optimize storage:
-- `'u8'`: 0-255 (1 byte)
-- `'u16'`: 0-65,535 (2 bytes) **[DEFAULT]**
-- `'u32'`: 0-4,294,967,295 (4 bytes)
-- `'u64'`: 0-18,446,744,073,709,551,615 (8 bytes)
-
-### For Players
-
-Join the private matchmaking queue:
+### For Players (`MatchmakingPlayer`)
 
 ```typescript
 import { MatchmakingPlayer } from "@1upmonster/duel";
+import { getAuthToken } from "@1upmonster/duel";
+import { createSolanaRpc } from "@solana/kit";
 
-const player = new MatchmakingPlayer(provider);
+const l1Rpc = createSolanaRpc("https://api.devnet.solana.com");
+const player = new MatchmakingPlayer(l1Rpc, signer);
 
-// Join queue (matching happens automatically in TEE)
-await player.joinQueue(queuePda, tenantPda, playerProfilePda);
+// High-level: creates ticket on L1, delegates to TEE, joins queue in one call
+const { token } = await getAuthToken("https://tee.magicblock.app", signer);
+const teeRpc = createSolanaRpc(`https://tee.magicblock.app?token=${token}`);
+
+const ticketPda = await player.enterQueue(
+  tenantPda,
+  queuePda,
+  playerProfilePda,
+  teeRpc,
+  `https://tee.magicblock.app?token=${token}`,
+  validatorPubkey,        // optional TEE validator
+  YOUR_GAME_PROGRAM_ID,   // optional: callback fires via Tenant PDA when matched
+);
+
+// Poll L1 until the ticket shows Matched status
+const match = await player.pollForMatch(ticketPda);
+// match = { opponent: Address, matchId: bigint }
 ```
 
 ## API Reference
 
 ### `MatchmakingAdmin`
 
-**Constructor**
-- `new MatchmakingAdmin(provider: AnchorProvider, programId?: PublicKey)`
+**Constructor:** `new MatchmakingAdmin(rpc, signer, programId?)`
 
-**Methods**
-- `initializeTenant(authority, tenantProgramId, eloWindow?, eloOffset?)` - Set up game tenant
-- `initializeQueue(authority, tenant)` - Create matchmaking queue
-- `delegateQueue(authority, validator?)` - Delegate to TEE validator
-- `getTenantPda(authority)` - Derive tenant PDA
-- `getQueuePda(authority)` - Derive queue PDA
+| Method | Description |
+|---|---|
+| `initializeTenant(tenantProgramId, options?)` | Create Tenant PDA with ELO config and optional callback |
+| `initializeQueue(authority, tenant)` | Create Queue PDA linked to tenant |
+| `delegateQueue(authority, validator?)` | Delegate queue to TEE (makes it private) |
+| `flushMatches(queue, tenant, ticketPdas)` | Update opponent tickets from pending matches |
+| `commitTickets(tenant, ticketPdas)` | Push matched ticket state back to L1 |
+| `resolveMatches(queue, tenant, ticketPdas, settlementDelayMs?)` | High-level: flush + wait + commit |
+| `getQueue(queuePda)` | Fetch queue account |
+| `getQueuePda(authority)` | Derive queue PDA |
+| `getTenantPda(authority)` | Derive tenant PDA |
 
 ### `MatchmakingPlayer`
 
-**Constructor**
-- `new MatchmakingPlayer(provider: AnchorProvider, programId?: PublicKey)`
+**Constructor:** `new MatchmakingPlayer(rpc, signer, programId?)`
 
-**Methods**
-- `joinQueue(queue, tenant, playerData)` - Join matchmaking queue
+| Method | Description |
+|---|---|
+| `enterQueue(tenant, queue, playerData, teeRpc, teeUrlWithToken, validator?, callbackProgram?)` | High-level: create ticket → delegate → join queue |
+| `createTicket(tenant)` | Create MatchTicket PDA on L1 |
+| `delegateTicket(player, tenant, validator?)` | Delegate ticket to TEE |
+| `joinQueue(queue, tenant, playerData, callbackProgram?)` | Join queue in TEE; callback fires via Tenant PDA on match |
+| `cancelTicket(tenant)` | Cancel search (sets ticket to Cancelled) |
+| `closeTicket(tenant)` | Reclaim rent after match or cancel |
+| `pollForMatch(ticketPda, maxAttempts?, pollInterval?)` | Poll L1 until ticket is Matched |
+| `getTicket(ticketPda)` | Fetch ticket account |
+| `withRpc(teeUrl)` | Return a new client pointing at a different RPC |
 
-## How It Works
+### `getAuthToken(rpcUrl, signer)`
 
-1. **Queue Joining**: Players call `joinQueue` directly via SDK
-2. **Matching**: TEE automatically processes matches based on ELO windows
-3. **Privacy**: Queue state is only visible within the TEE, not on L1
+Authenticate with the MagicBlock TEE. Returns `{ token, expiresAt }`. The token is passed as `?token=<jwt>` in the TEE RPC URL.
 
-## Links
+### `waitUntilPermissionActive(teeUrlWithToken, pda)`
 
-- [GitHub Repository](https://github.com/val-samonte/private-matchmaking)
-- [Full Documentation](https://github.com/val-samonte/private-matchmaking#readme)
+Poll the TEE until a delegated PDA is active (authorized users list is non-empty).
+
+## How the Callback Works
+
+When a match is found during `join_queue`, the duel program fires a CPI callback **signed by the Tenant PDA** via `invoke_signed`. This is cryptographically unforgeable — game programs can verify the signer is the Tenant PDA without any additional access control:
+
+```rust
+pub fn on_match_found(
+    ctx: Context<OnMatchFound>,
+    player1: Pubkey,
+    player2: Pubkey,
+    match_id: u64,
+) -> Result<()> {
+    // ctx.accounts.signer.key() == Tenant PDA — verified by the runtime
+    // Only the duel program can produce this signer
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct OnMatchFound<'info> {
+    pub signer: Signer<'info>, // will be the Tenant PDA
+}
+```
+
+Pass the callback program as `remaining_accounts` in `joinQueue` (or via `callbackProgram` param in the SDK) for the callback to fire.
+
+## ELO Data Types
+
+| Type | Bytes | Range |
+|---|---|---|
+| `"u8"` | 1 | 0–255 |
+| `"u16"` | 2 | 0–65,535 |
+| `"u32"` | 4 | 0–4,294,967,295 |
+| `"u64"` | 8 | 0–18,446,744,073,709,551,615 |
 
 ## License
 

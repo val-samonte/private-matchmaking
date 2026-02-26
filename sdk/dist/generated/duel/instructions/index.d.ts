@@ -16,3 +16,4 @@ export * from './initializeQueue';
 export * from './initializeTenant';
 export * from './joinQueue';
 export * from './processUndelegation';
+export * from './setupTicketPermission';

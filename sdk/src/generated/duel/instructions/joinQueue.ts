@@ -15,7 +15,7 @@ export const JOIN_QUEUE_DISCRIMINATOR = new Uint8Array([157, 115, 48, 109, 65, 8
 export function getJoinQueueDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(JOIN_QUEUE_DISCRIMINATOR); }
 
 export type JoinQueueInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountQueue extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayerData extends string | AccountMeta<string> = string, TAccountPlayerTicket extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountQueue extends string ? WritableAccount<TAccountQueue> : TAccountQueue, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayerData extends string ? WritableAccount<TAccountPlayerData> : TAccountPlayerData, TAccountPlayerTicket extends string ? WritableAccount<TAccountPlayerTicket> : TAccountPlayerTicket, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, ...TRemainingAccounts]>;
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountQueue extends string ? WritableAccount<TAccountQueue> : TAccountQueue, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayerData extends string ? ReadonlyAccount<TAccountPlayerData> : TAccountPlayerData, TAccountPlayerTicket extends string ? WritableAccount<TAccountPlayerTicket> : TAccountPlayerTicket, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, ...TRemainingAccounts]>;
 
 export type JoinQueueInstructionData = { discriminator: ReadonlyUint8Array;  };
 
@@ -46,7 +46,7 @@ export async function getJoinQueueInstructionAsync<TAccountQueue extends string,
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: true }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false } }
+const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: false }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
@@ -72,7 +72,7 @@ export function getJoinQueueInstruction<TAccountQueue extends string, TAccountTe
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: true }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false } }
+const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: false }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 

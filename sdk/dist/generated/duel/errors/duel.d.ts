@@ -18,9 +18,7 @@ export declare const DUEL_ERROR__INVALID_ELO_SIZE = 6003;
 export declare const DUEL_ERROR__INVALID_TICKET_STATUS = 6004;
 /** InvalidTicketAccount: Invalid ticket account */
 export declare const DUEL_ERROR__INVALID_TICKET_ACCOUNT = 6005;
-/** MissingCallbackProgram: Missing or invalid callback program in remaining accounts */
-export declare const DUEL_ERROR__MISSING_CALLBACK_PROGRAM = 6006;
-export type DuelError = typeof DUEL_ERROR__DATA_TOO_SMALL | typeof DUEL_ERROR__INVALID_ELO_SIZE | typeof DUEL_ERROR__INVALID_TENANT | typeof DUEL_ERROR__INVALID_TICKET_ACCOUNT | typeof DUEL_ERROR__INVALID_TICKET_STATUS | typeof DUEL_ERROR__MISSING_CALLBACK_PROGRAM | typeof DUEL_ERROR__UNAUTHORIZED;
+export type DuelError = typeof DUEL_ERROR__DATA_TOO_SMALL | typeof DUEL_ERROR__INVALID_ELO_SIZE | typeof DUEL_ERROR__INVALID_TENANT | typeof DUEL_ERROR__INVALID_TICKET_ACCOUNT | typeof DUEL_ERROR__INVALID_TICKET_STATUS | typeof DUEL_ERROR__UNAUTHORIZED;
 export declare function getDuelErrorMessage(code: DuelError): string;
 export declare function isDuelError<TProgramErrorCode extends DuelError>(error: unknown, transactionMessage: {
     instructions: Record<number, {

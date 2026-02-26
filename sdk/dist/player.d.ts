@@ -8,7 +8,7 @@ export declare class MatchmakingPlayer {
     getTicket(ticketPda: Address): Promise<import("@solana/accounts").MaybeAccount<import("./generated/duel/index.js").MatchTicket, string>>;
     createTicket(tenant: Address): Promise<string>;
     delegateTicket(player: Address, tenant: Address, validator?: Address): Promise<string>;
-    joinQueue(queue: Address, tenant: Address, playerData: Address): Promise<string>;
+    joinQueue(queue: Address, tenant: Address, playerData: Address, callbackProgram?: Address): Promise<string>;
     cancelTicket(tenant: Address): Promise<string>;
     closeTicket(tenant: Address): Promise<string>;
     /**
@@ -19,6 +19,12 @@ export declare class MatchmakingPlayer {
         opponent: Address;
         matchId: bigint;
     } | null>;
+    /**
+     * High-level: full matchmaking TEE entry flow.
+     * Creates ticket on L1, delegates it to TEE, waits for activation, then joins the queue.
+     * Use individual methods (createTicket, delegateTicket, joinQueue) as escape hatches if needed.
+     */
+    enterQueue(tenant: Address, queue: Address, playerData: Address, teeRpc: Rpc<SolanaRpcApi>, teeUrlWithToken: string, validator?: Address, callbackProgram?: Address): Promise<Address>;
     /** Create a new MatchmakingPlayer pointing at a TEE RPC endpoint. */
     withRpc(teeUrl: string): MatchmakingPlayer;
 }

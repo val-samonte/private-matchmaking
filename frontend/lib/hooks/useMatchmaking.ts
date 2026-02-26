@@ -11,6 +11,7 @@ import { sendInstruction, sendInstructions } from "@/lib/utils/transaction";
 import { deriveQueuePda, deriveTenantPda, deriveTicketPda } from "@/lib/utils/pda";
 import {
   DUEL_PROGRAM_ID,
+  RPS_GAME_PROGRAM_ID,
   QUEUE_AUTHORITY,
   TEE_RPC_URL,
   TEE_WS_URL,
@@ -171,7 +172,12 @@ export function useMatchmaking() {
         playerData: profilePda,
         signer,
       });
-      await sendInstruction(teeRpc, joinIx, kitWallet);
+      // Append callback program as remaining account so the Tenant PDA callback fires on match
+      const joinIxWithCallback = {
+        ...joinIx,
+        accounts: [...joinIx.accounts, { address: RPS_GAME_PROGRAM_ID, role: 0 as const }],
+      };
+      await sendInstruction(teeRpc, joinIxWithCallback as any, kitWallet);
       console.log("Joined queue via TEE");
 
       if (signal.aborted) throw new Error("Search cancelled");

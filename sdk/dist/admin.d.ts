@@ -20,8 +20,15 @@ export declare class MatchmakingAdmin {
     initializeTenant(tenantProgramId: Address, options?: InitializeTenantOptions): Promise<string>;
     initializeQueue(_authority: Address, tenant: Address): Promise<string>;
     delegateQueue(authority: Address, validator?: Address): Promise<string>;
-    flushMatches(queue: Address, tenant: Address, ticketPdas: Address[], callbackProgram?: Address): Promise<string>;
+    flushMatches(queue: Address, tenant: Address, ticketPdas: Address[]): Promise<string>;
     commitTickets(tenant: Address, ticketPdas: Address[]): Promise<string>;
+    /**
+     * High-level: full match resolution flow (runs on TEE).
+     * Reads the queue's pending matches, flushes them (updating opponent tickets),
+     * waits for TEE settlement, then commits all tickets back to L1.
+     * Use individual methods (flushMatches, commitTickets) as escape hatches if needed.
+     */
+    resolveMatches(queue: Address, tenant: Address, ticketPdas: Address[], settlementDelayMs?: number): Promise<void>;
     /** Create a new MatchmakingAdmin pointing at a TEE RPC endpoint. */
     withRpc(teeUrl: string): MatchmakingAdmin;
 }

@@ -984,11 +984,6 @@
       "code": 6005,
       "name": "InvalidTicketAccount",
       "msg": "Invalid ticket account"
-    },
-    {
-      "code": 6006,
-      "name": "MissingCallbackProgram",
-      "msg": "Missing or invalid callback program in remaining accounts"
     }
   ],
   "types": [

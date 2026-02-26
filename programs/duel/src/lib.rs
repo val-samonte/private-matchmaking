@@ -727,8 +727,6 @@ pub enum MatchmakingError {
     InvalidTicketStatus,
     #[msg("Invalid ticket account")]
     InvalidTicketAccount,
-    #[msg("Missing or invalid callback program in remaining accounts")]
-    MissingCallbackProgram,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
