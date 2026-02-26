@@ -47,20 +47,21 @@ export async function getAuthToken(
 /**
  * Poll the TEE /permission endpoint until the given PDA has authorized users,
  * indicating delegation is active. Throws on timeout.
+ *
+ * IMPORTANT: the /permission endpoint must be called WITHOUT the auth token.
+ * Polling /permission?token=JWT&pubkey=PDA returns per-user access (always empty
+ * until you're explicitly added), not the global delegation activation status.
+ * The reference implementation (anchor-rock-paper-scissor) confirms this by
+ * passing the bare endpoint URL with no token.
  */
 export async function waitUntilPermissionActive(
   teeUrlWithToken: string,
   pda: Address,
   timeoutMs = 120000,
 ): Promise<void> {
-  // Parse URL: "https://host/path?token=xxx" -> baseUrl="https://host/path", tokenParam="token=xxx"
-  const [baseUrl, tokenParam] = teeUrlWithToken.replace("/?", "?").split("?");
-  let permissionUrl: string;
-  if (tokenParam) {
-    permissionUrl = `${baseUrl}/permission?${tokenParam}&pubkey=${pda}`;
-  } else {
-    permissionUrl = `${baseUrl}/permission?pubkey=${pda}`;
-  }
+  // Always strip the token — /permission?pubkey=PDA is the correct check
+  const [baseUrl] = teeUrlWithToken.replace("/?", "?").split("?");
+  const permissionUrl = `${baseUrl}/permission?pubkey=${pda}`;
 
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

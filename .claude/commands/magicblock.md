@@ -36,12 +36,18 @@ The TEE enforces: **every writable account in a transaction must have been deleg
 
 ```
 L1: delegate_ticket / delegate_queue  →  TEE picks up the account
-TEE: waitUntilPermissionActive(teeUrlWithToken, pda, 30000)
-  Polls: GET {teeUrl}/permission?token={jwt}&pubkey={pda}
+TEE: waitUntilPermissionActive(teeUrlWithToken, pda, 120000)
+  Polls: GET {teeUrl}/permission?pubkey={pda}   ← NO TOKEN (see critical note below)
   Success: { authorizedUsers: ["<pubkey>"] }  (non-empty)
 TEE: send instructions using teeRpc (same Kit RPC, different URL)
 L1: commit_tickets / commit_queue  →  changes written back to L1
 ```
+
+**CRITICAL — permission polling must NOT include the auth token.**
+- `GET /permission?pubkey={pda}` → returns global delegation activation status
+- `GET /permission?token={jwt}&pubkey={pda}` → returns per-user access for that JWT owner (ALWAYS empty unless explicitly granted; this is NOT what we want)
+- The reference implementation (`anchor-rock-paper-scissor`) confirms: `waitUntilPermissionActive(ephemeralRpcEndpoint, pda)` — no token.
+- Our `waitUntilPermissionActive` always strips the token from the URL before polling.
 
 ## Common errors
 
@@ -52,7 +58,7 @@ L1: commit_tickets / commit_queue  →  changes written back to L1
 | `NetworkMismatch` / `UserKeyring not found` | `StandardWalletAdapter` chain check failing | Bypass adapter; use `@wallet-standard/react` directly |
 | `signedMsg.signatures[addr]` is undefined | Kit signMessages returns `signedMsg[addr]`, not under `.signatures` | Use `signedMsg[signer.address]` |
 | `BigInt serialization` in `JSON.stringify` | Kit error objects may contain BigInt | Use replacer: `(_, v) => typeof v === 'bigint' ? v.toString() : v` |
-| Delegation activation timeout | `waitUntilPermissionActive` using wrong endpoint | Must use `/permission?token=X&pubkey=Y`, check `authorizedUsers.length > 0` |
+| Delegation activation timeout | `waitUntilPermissionActive` polling with auth token | Must use `/permission?pubkey=Y` WITHOUT token — token-scoped endpoint returns per-user access (always empty), not global delegation status |
 
 ## Useful commands
 
