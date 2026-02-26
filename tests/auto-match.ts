@@ -224,23 +224,16 @@ describe("web3-matchmaking-with-tickets", () => {
 
   it("P1 Creates Ticket, Delegates, and Joins Queue", async () => {
     const clientP1 = new MatchmakingPlayer(l1Rpc, player1, DUEL_PROGRAM_ID);
+    const teeRpc1 = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
 
-    await clientP1.createTicket(tenantPda);
-    console.log("P1 Ticket Created on L1:", p1TicketPda);
+    await clientP1.enterQueue(
+      tenantPda, queuePda, p1ProfilePda,
+      teeRpc1, `${TEE_RPC_URL}?token=${token1}`,
+      ER_VALIDATOR, RPS_GAME_PROGRAM_ID,
+    );
+    console.log("P1 Entered Matchmaking Queue:", p1TicketPda);
 
-    await clientP1.delegateTicket(player1.address, tenantPda, ER_VALIDATOR);
-    console.log("P1 Ticket Delegated to TEE");
-
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1}`, p1TicketPda);
-    console.log("P1 Ticket Active in TEE");
-
-    const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
-    const clientP1Tee = new MatchmakingPlayer(teeRpc, player1, DUEL_PROGRAM_ID);
-
-    const joinSig1 = await clientP1Tee.joinQueue(queuePda, tenantPda, p1ProfilePda);
-    console.log("P1 Joined Queue sig:", joinSig1.slice(0, 20) + "...");
-
-    // Wait for TEE to process the transaction and check status
+    // Wait for TEE to process the join
     await new Promise(r => setTimeout(r, 3000));
     const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
     const adminTee = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
@@ -265,20 +258,14 @@ describe("web3-matchmaking-with-tickets", () => {
 
   it("P2 Creates Ticket, Delegates, Joins Queue -> Auto-Match", async () => {
     const clientP2 = new MatchmakingPlayer(l1Rpc, player2, DUEL_PROGRAM_ID);
-
-    await clientP2.createTicket(tenantPda);
-    console.log("P2 Ticket Created on L1:", p2TicketPda);
-
-    await clientP2.delegateTicket(player2.address, tenantPda, ER_VALIDATOR);
-
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token2}`, p2TicketPda);
-    console.log("P2 Ticket Active in TEE");
-
     const teeRpc2 = createSolanaRpc(`${TEE_RPC_URL}?token=${token2}`);
-    const clientP2Tee = new MatchmakingPlayer(teeRpc2, player2, DUEL_PROGRAM_ID);
 
-    const joinSig2 = await clientP2Tee.joinQueue(queuePda, tenantPda, p2ProfilePda);
-    console.log("P2 Joined Queue sig:", joinSig2.slice(0, 20) + "...");
+    await clientP2.enterQueue(
+      tenantPda, queuePda, p2ProfilePda,
+      teeRpc2, `${TEE_RPC_URL}?token=${token2}`,
+      ER_VALIDATOR, RPS_GAME_PROGRAM_ID,
+    );
+    console.log("P2 Entered Matchmaking Queue:", p2TicketPda);
 
     // Wait for TEE to process and check status
     await new Promise(r => setTimeout(r, 3000));
@@ -288,7 +275,7 @@ describe("web3-matchmaking-with-tickets", () => {
     console.log("Queue Entries (After Auto-Match):", queue.data.entries.length);
     assert.equal(queue.data.entries.length, 0, "Queue should be empty after match");
 
-    const p2TicketRes = await clientP2Tee.getTicket(p2TicketPda);
+    const p2TicketRes = await clientP2.withRpc(`${TEE_RPC_URL}?token=${token2}`).getTicket(p2TicketPda);
     assert.ok(p2TicketRes.exists, "P2 ticket should exist");
     const p2Status = p2TicketRes.data.status;
     console.log("P2 Ticket Status:", JSON.stringify(p2Status, (_, v) => typeof v === "bigint" ? v.toString() : v));
@@ -298,46 +285,25 @@ describe("web3-matchmaking-with-tickets", () => {
     assert.equal(queue.data.pendingMatches.length, 1, "Should have 1 pending match for P1");
   });
 
-  it("Flush Matches - Update P1's Ticket", async () => {
+  it("Resolve Matches and Commit to L1", async () => {
     const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
     const mmAdmin = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
 
-    await mmAdmin.flushMatches(queuePda, tenantPda, [p1TicketPda], RPS_GAME_PROGRAM_ID);
-    console.log("Flushed pending matches");
-    await new Promise(r => setTimeout(r, 3000));
-
-    const teeRpc1 = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
-    const clientP1Tee = new MatchmakingPlayer(teeRpc1, player1, DUEL_PROGRAM_ID);
-    const p1TicketRes = await clientP1Tee.getTicket(p1TicketPda);
-    assert.ok(p1TicketRes.exists, "P1 ticket should exist");
-    const p1Status = p1TicketRes.data.status;
-    console.log("P1 Ticket Status:", JSON.stringify(p1Status, (_, v) => typeof v === "bigint" ? v.toString() : v));
-    assert.equal(p1Status.__kind, "Matched", "P1 ticket should be in Matched status");
-
-    const queue = await mmAdmin.getQueue(queuePda);
-    assert.equal(queue.data.pendingMatches.length, 0, "No more pending matches");
-  });
-
-  it("Commit Tickets to L1", async () => {
-    const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
-    const mmAdmin = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
-
-    await mmAdmin.commitTickets(tenantPda, [p1TicketPda, p2TicketPda]);
-    console.log("Committed both tickets to L1");
+    // High-level: reads pending matches from queue, flushes them, waits, then commits all to L1
+    await mmAdmin.resolveMatches(queuePda, tenantPda, [p1TicketPda, p2TicketPda]);
+    console.log("Matches resolved and committed to L1");
 
     // Wait for L1 to settle
     await new Promise((r) => setTimeout(r, 5000));
 
-    const clientP1 = new MatchmakingPlayer(l1Rpc, player1, DUEL_PROGRAM_ID);
-    const clientP2 = new MatchmakingPlayer(l1Rpc, player2, DUEL_PROGRAM_ID);
+    const bigIntReplacer = (_: string, v: unknown) => typeof v === "bigint" ? v.toString() : v;
 
-    const p1Res = await clientP1.getTicket(p1TicketPda);
-    const p2Res = await clientP2.getTicket(p2TicketPda);
+    const p1Res = await new MatchmakingPlayer(l1Rpc, player1, DUEL_PROGRAM_ID).getTicket(p1TicketPda);
+    const p2Res = await new MatchmakingPlayer(l1Rpc, player2, DUEL_PROGRAM_ID).getTicket(p2TicketPda);
 
     assert.ok(p1Res.exists, "P1 ticket should exist on L1");
     assert.ok(p2Res.exists, "P2 ticket should exist on L1");
 
-    const bigIntReplacer = (_: string, v: unknown) => typeof v === "bigint" ? v.toString() : v;
     console.log("P1 Ticket (L1):", JSON.stringify(p1Res.data.status, bigIntReplacer));
     console.log("P2 Ticket (L1):", JSON.stringify(p2Res.data.status, bigIntReplacer));
 

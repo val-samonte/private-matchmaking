@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
-use anchor_lang::solana_program::program::invoke;
+use anchor_lang::solana_program::program::invoke_signed;
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_accounts;
@@ -163,7 +163,7 @@ pub mod duel {
     }
 
     /// Modified join_queue: now requires player's MatchTicket
-    pub fn join_queue(ctx: Context<JoinQueue>) -> Result<()> {
+    pub fn join_queue<'a>(ctx: Context<'_, '_, 'a, 'a, JoinQueue<'a>>) -> Result<()> {
         // 1. Verify ticket
         let ticket = &ctx.accounts.player_ticket;
         require!(
@@ -236,75 +236,123 @@ pub mod duel {
             ctx.accounts.queue.entries.len()
         );
 
-        // 5. Automatically process matches after adding player
-        let queue = &mut ctx.accounts.queue;
-        let window = ctx.accounts.tenant.elo_window;
+        // 5. Automatically process matches — capture result for callback
+        let mut found_match: Option<(Pubkey, Pubkey, u64)> = None;
+        {
+            let queue = &mut ctx.accounts.queue;
+            let window = ctx.accounts.tenant.elo_window;
 
-        if queue.entries.len() >= 2 {
-            let new_player_idx = queue.entries.len() - 1;
-            let new_player = queue.entries[new_player_idx];
+            if queue.entries.len() >= 2 {
+                let new_player_idx = queue.entries.len() - 1;
+                let new_player = queue.entries[new_player_idx];
 
-            for i in 0..new_player_idx {
-                let other_player = queue.entries[i];
-                let diff = if new_player.elo > other_player.elo {
-                    new_player.elo - other_player.elo
-                } else {
-                    other_player.elo - new_player.elo
-                };
-
-                if diff <= window {
-                    // Match found!
-                    let timestamp = Clock::get()?.unix_timestamp;
-                    queue.match_counter += 1;
-                    let match_id = queue.match_counter;
-
-                    msg!(
-                        "Auto-Match Found: {} (ELO {}) vs {} (ELO {}), match_id: {}",
-                        new_player.player,
-                        new_player.elo,
-                        other_player.player,
-                        other_player.elo,
-                        match_id
-                    );
-
-                    // Emit event
-                    emit!(MatchFound {
-                        player1: new_player.player,
-                        player2: other_player.player,
-                        match_id,
-                        timestamp,
-                    });
-
-                    // Store in matches list (keep last 10)
-                    let match_entry = MatchEntry {
-                        player1: new_player.player,
-                        player2: other_player.player,
-                        match_id,
-                        timestamp,
+                for i in 0..new_player_idx {
+                    let other_player = queue.entries[i];
+                    let diff = if new_player.elo > other_player.elo {
+                        new_player.elo - other_player.elo
+                    } else {
+                        other_player.elo - new_player.elo
                     };
-                    queue.matches.push(match_entry);
-                    if queue.matches.len() > 10 {
-                        queue.matches.remove(0);
+
+                    if diff <= window {
+                        // Match found!
+                        let timestamp = Clock::get()?.unix_timestamp;
+                        queue.match_counter += 1;
+                        let match_id = queue.match_counter;
+
+                        msg!(
+                            "Auto-Match Found: {} (ELO {}) vs {} (ELO {}), match_id: {}",
+                            new_player.player,
+                            new_player.elo,
+                            other_player.player,
+                            other_player.elo,
+                            match_id
+                        );
+
+                        // Emit event
+                        emit!(MatchFound {
+                            player1: new_player.player,
+                            player2: other_player.player,
+                            match_id,
+                            timestamp,
+                        });
+
+                        // Store in matches list (keep last 10)
+                        let match_entry = MatchEntry {
+                            player1: new_player.player,
+                            player2: other_player.player,
+                            match_id,
+                            timestamp,
+                        };
+                        queue.matches.push(match_entry);
+                        if queue.matches.len() > 10 {
+                            queue.matches.remove(0);
+                        }
+
+                        // Update the joining player's ticket (we have it as an account)
+                        let player_ticket = &mut ctx.accounts.player_ticket;
+                        player_ticket.status = TicketStatus::Matched {
+                            opponent: other_player.player,
+                            match_id,
+                        };
+
+                        // Store a PendingMatch for the opponent (their ticket isn't available here)
+                        queue.pending_matches.push(PendingMatch {
+                            player: other_player.player,
+                            opponent: new_player.player,
+                            match_id,
+                        });
+
+                        // Remove both players from queue (remove higher index first)
+                        queue.entries.remove(new_player_idx);
+                        queue.entries.remove(i);
+
+                        found_match = Some((new_player.player, other_player.player, match_id));
+                        break;
                     }
+                }
+            }
+        } // mutable borrows released here
 
-                    // Update the joining player's ticket (we have it as an account)
-                    let player_ticket = &mut ctx.accounts.player_ticket;
-                    player_ticket.status = TicketStatus::Matched {
-                        opponent: other_player.player,
-                        match_id,
-                    };
+        // 6. Fire callback via Tenant PDA (invoke_signed)
+        if let Some((p1, p2, mid)) = found_match {
+            if let (Some(callback_pid), Some(callback_disc)) = (
+                ctx.accounts.tenant.callback_program_id,
+                ctx.accounts.tenant.callback_discriminator,
+            ) {
+                if let Some(cb_prog) = ctx.remaining_accounts.first() {
+                    if cb_prog.key() == callback_pid && cb_prog.executable {
+                        let authority = ctx.accounts.tenant.authority;
+                        let auth_bytes = authority.to_bytes();
+                        let (_, bump) = Pubkey::find_program_address(
+                            &[b"tenant", &auth_bytes],
+                            ctx.program_id,
+                        );
+                        let bump_arr = [bump];
+                        let seeds: &[&[u8]] = &[b"tenant", &auth_bytes, &bump_arr];
 
-                    // Store a PendingMatch for the opponent (their ticket isn't available here)
-                    queue.pending_matches.push(PendingMatch {
-                        player: other_player.player,
-                        opponent: new_player.player,
-                        match_id,
-                    });
+                        let mut data = Vec::with_capacity(80);
+                        data.extend_from_slice(&callback_disc);
+                        data.extend_from_slice(p1.as_ref());
+                        data.extend_from_slice(p2.as_ref());
+                        data.extend_from_slice(&mid.to_le_bytes());
 
-                    // Remove both players from queue (remove higher index first)
-                    queue.entries.remove(new_player_idx);
-                    queue.entries.remove(i);
-                    break;
+                        let ix = Instruction {
+                            program_id: callback_pid,
+                            accounts: vec![AccountMeta {
+                                pubkey: ctx.accounts.tenant.key(),
+                                is_signer: true,
+                                is_writable: false,
+                            }],
+                            data,
+                        };
+                        invoke_signed(
+                            &ix,
+                            &[ctx.accounts.tenant.to_account_info(), cb_prog.clone()],
+                            &[seeds],
+                        )?;
+                        msg!("Callback via Tenant PDA: {} vs {} (id: {})", p1, p2, mid);
+                    }
                 }
             }
         }
@@ -325,13 +373,7 @@ pub mod duel {
 
         // Process each pending match against remaining accounts
         let remaining = &ctx.remaining_accounts;
-        let has_callback = ctx.accounts.tenant.callback_program_id.is_some();
-        // If callback is configured, the last remaining account is the callback program
-        let ticket_account_limit = if has_callback && !remaining.is_empty() {
-            remaining.len() - 1
-        } else {
-            remaining.len()
-        };
+        let ticket_account_limit = remaining.len();
         let mut remaining_idx = 0;
 
         for pm in &pending {
@@ -391,58 +433,6 @@ pub mod duel {
                 pm.opponent,
                 pm.match_id
             );
-        }
-
-        // CPI callback if configured on the tenant
-        if let (Some(callback_pid), Some(callback_disc)) = (
-            ctx.accounts.tenant.callback_program_id,
-            ctx.accounts.tenant.callback_discriminator,
-        ) {
-            // The callback program AccountInfo must be the last remaining account
-            require!(
-                remaining.len() > remaining_idx,
-                MatchmakingError::MissingCallbackProgram
-            );
-            let callback_program_info = &remaining[remaining.len() - 1];
-            require!(
-                callback_program_info.key() == callback_pid,
-                MatchmakingError::MissingCallbackProgram
-            );
-            require!(
-                callback_program_info.executable,
-                MatchmakingError::MissingCallbackProgram
-            );
-
-            for pm in &pending[..remaining_idx] {
-                // data = discriminator(8) ++ player(32) ++ opponent(32) ++ match_id(8)
-                let mut data = Vec::with_capacity(80);
-                data.extend_from_slice(&callback_disc);
-                data.extend_from_slice(pm.player.as_ref());
-                data.extend_from_slice(pm.opponent.as_ref());
-                data.extend_from_slice(&pm.match_id.to_le_bytes());
-
-                let ix = Instruction {
-                    program_id: callback_pid,
-                    accounts: vec![AccountMeta {
-                        pubkey: ctx.accounts.signer.key(),
-                        is_signer: true,
-                        is_writable: false,
-                    }],
-                    data,
-                };
-
-                invoke(
-                    &ix,
-                    &[ctx.accounts.signer.to_account_info(), callback_program_info.clone()],
-                )?;
-
-                msg!(
-                    "Callback invoked for match: {} vs {} (id: {})",
-                    pm.player,
-                    pm.opponent,
-                    pm.match_id
-                );
-            }
         }
 
         msg!("Flush complete: {} matches processed", remaining_idx);

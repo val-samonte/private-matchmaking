@@ -127,7 +127,6 @@ export class MatchmakingAdmin {
     queue: Address,
     tenant: Address,
     ticketPdas: Address[],
-    callbackProgram?: Address,
   ): Promise<string> {
     const ix = getFlushMatchesInstruction({
       queue,
@@ -135,14 +134,12 @@ export class MatchmakingAdmin {
       signer: this.signer,
     }, { programAddress: this.programId });
 
-    const remainingAccounts = [
-      ...ticketPdas.map((address) => ({ address, role: 1 as const })),
-      ...(callbackProgram ? [{ address: callbackProgram, role: 0 as const }] : []),
-    ];
-
     const ixWithRemaining = {
       ...ix,
-      accounts: [...ix.accounts, ...remainingAccounts],
+      accounts: [
+        ...ix.accounts,
+        ...ticketPdas.map((address) => ({ address, role: 1 as const })),
+      ],
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,6 +165,33 @@ export class MatchmakingAdmin {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return sendInstruction(this.rpc, ixWithRemaining as any, this.signer);
+  }
+
+  /**
+   * High-level: full match resolution flow (runs on TEE).
+   * Reads the queue's pending matches, flushes them (updating opponent tickets),
+   * waits for TEE settlement, then commits all tickets back to L1.
+   * Use individual methods (flushMatches, commitTickets) as escape hatches if needed.
+   */
+  async resolveMatches(
+    queue: Address,
+    tenant: Address,
+    ticketPdas: Address[],
+    settlementDelayMs = 3000,
+  ): Promise<void> {
+    const queueData = await this.getQueue(queue);
+    const pendingTicketPdas = await Promise.all(
+      queueData.data.pendingMatches.map((pm) =>
+        utils.deriveTicketPda(this.programId, pm.player, tenant),
+      ),
+    );
+
+    if (pendingTicketPdas.length > 0) {
+      await this.flushMatches(queue, tenant, pendingTicketPdas);
+      await new Promise((r) => setTimeout(r, settlementDelayMs));
+    }
+
+    await this.commitTickets(tenant, ticketPdas);
   }
 
   /** Create a new MatchmakingAdmin pointing at a TEE RPC endpoint. */

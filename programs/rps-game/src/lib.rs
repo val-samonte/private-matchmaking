@@ -218,7 +218,7 @@ pub mod rps_game {
     /// Callback handler invoked by the duel program after a match is committed.
     /// Demonstrates the CPI callback pattern for permissionless integration.
     pub fn on_match_found(
-        _ctx: Context<OnMatchFound>,
+        ctx: Context<OnMatchFound>,
         player1: Pubkey,
         player2: Pubkey,
         match_id: u64,
@@ -229,8 +229,7 @@ pub mod rps_game {
             player2,
             match_id
         );
-        // In a full implementation, this could auto-create a game session.
-        // For now, just log the callback.
+        msg!("Callback authority (Duel Tenant PDA): {}", ctx.accounts.signer.key());
         Ok(())
     }
 

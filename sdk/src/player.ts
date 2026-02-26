@@ -15,6 +15,7 @@ import {
   accountType,
 } from "./generated/duel/index.js";
 import { sendInstruction } from "./transaction.js";
+import { waitUntilPermissionActive } from "./tee.js";
 import * as utils from "./utils.js";
 
 const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
@@ -69,6 +70,7 @@ export class MatchmakingPlayer {
     queue: Address,
     tenant: Address,
     playerData: Address,
+    callbackProgram?: Address,
   ): Promise<string> {
     const ix = await getJoinQueueInstructionAsync({
       queue,
@@ -76,7 +78,11 @@ export class MatchmakingPlayer {
       playerData,
       signer: this.signer,
     }, { programAddress: this.programId });
-    return sendInstruction(this.rpc, ix, this.signer);
+    const ixFinal = callbackProgram
+      ? { ...ix, accounts: [...ix.accounts, { address: callbackProgram, role: 0 as const }] }
+      : ix;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return sendInstruction(this.rpc, ixFinal as any, this.signer);
   }
 
   async cancelTicket(tenant: Address): Promise<string> {
@@ -120,6 +126,33 @@ export class MatchmakingPlayer {
       }
     }
     return null;
+  }
+
+  /**
+   * High-level: full matchmaking TEE entry flow.
+   * Creates ticket on L1, delegates it to TEE, waits for activation, then joins the queue.
+   * Use individual methods (createTicket, delegateTicket, joinQueue) as escape hatches if needed.
+   */
+  async enterQueue(
+    tenant: Address,
+    queue: Address,
+    playerData: Address,
+    teeRpc: Rpc<SolanaRpcApi>,
+    teeUrlWithToken: string,
+    validator?: Address,
+    callbackProgram?: Address,
+  ): Promise<Address> {
+    const player = this.signer.address as Address;
+    const ticketPda = await this.getTicketPda(player, tenant);
+
+    await this.createTicket(tenant);
+    await this.delegateTicket(player, tenant, validator);
+    await waitUntilPermissionActive(teeUrlWithToken, ticketPda);
+
+    const teeClient = new MatchmakingPlayer(teeRpc, this.signer, this.programId);
+    await teeClient.joinQueue(queue, tenant, playerData, callbackProgram);
+
+    return ticketPda;
   }
 
   /** Create a new MatchmakingPlayer pointing at a TEE RPC endpoint. */

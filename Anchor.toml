@@ -17,7 +17,7 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "npx tsx node_modules/.bin/_mocha --timeout 1000000 tests/auto-match.ts"
+test = "npx tsx node_modules/.bin/_mocha --timeout 1000000 tests/auto-match.ts tests/callback.ts"
 init-queue = "npx tsx scripts/init-queue.ts"
 check-queue = "npx tsx scripts/check-queue-status.ts"
 generate-tenant-authority = "npx tsx scripts/generate-tenant-authority.ts"
