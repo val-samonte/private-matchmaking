@@ -241,17 +241,16 @@ describe("web3-matchmaking-with-tickets", () => {
     console.log("Queue Entries (TEE via tokenQ):", queue.data.entries.length);
     assert.equal(queue.data.entries.length, 1);
 
-    // Privacy check: L1 should not see the entry
+    // Privacy check: L1 must not see any queue entries (account is either locked or shows 0)
     console.log("Checking L1 Privacy...");
     try {
       const adminL1 = new MatchmakingAdmin(l1Rpc, player1, DUEL_PROGRAM_ID);
       const queueL1 = await adminL1.getQueue(queuePda);
-      if (queueL1.data.entries.length === 0) {
-        console.log("PRIVACY CONFIRMED: L1 sees 0 entries.");
-      } else {
-        console.log("WARNING: L1 sees entries! State might be leaking.");
-      }
-    } catch {
+      assert.equal(queueL1.data.entries.length, 0, "Privacy breach: L1 should not see TEE queue entries");
+      console.log("PRIVACY CONFIRMED: L1 sees 0 entries.");
+    } catch (e: unknown) {
+      if ((e as Error).name === "AssertionError") throw e;
+      // Account is locked by the delegation program — full privacy, also acceptable
       console.log("PRIVACY CONFIRMED: L1 could not fetch account (Delegated/Locked).");
     }
   });

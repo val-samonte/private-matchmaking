@@ -9,6 +9,6 @@ export declare function getAuthToken(rpcUrl: string, signer: MessagePartialSigne
 }>;
 /**
  * Poll the TEE /permission endpoint until the given PDA has authorized users,
- * indicating delegation is active. Returns false on timeout (does not throw).
+ * indicating delegation is active. Throws on timeout.
  */
-export declare function waitUntilPermissionActive(teeUrlWithToken: string, pda: Address, timeoutMs?: number): Promise<boolean>;
+export declare function waitUntilPermissionActive(teeUrlWithToken: string, pda: Address, timeoutMs?: number): Promise<void>;

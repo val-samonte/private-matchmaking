@@ -46,13 +46,13 @@ export async function getAuthToken(
 
 /**
  * Poll the TEE /permission endpoint until the given PDA has authorized users,
- * indicating delegation is active. Returns false on timeout (does not throw).
+ * indicating delegation is active. Throws on timeout.
  */
 export async function waitUntilPermissionActive(
   teeUrlWithToken: string,
   pda: Address,
-  timeoutMs = 30000,
-): Promise<boolean> {
+  timeoutMs = 120000,
+): Promise<void> {
   // Parse URL: "https://host/path?token=xxx" -> baseUrl="https://host/path", tokenParam="token=xxx"
   const [baseUrl, tokenParam] = teeUrlWithToken.replace("/?", "?").split("?");
   let permissionUrl: string;
@@ -68,12 +68,12 @@ export async function waitUntilPermissionActive(
       const res = await fetch(permissionUrl);
       if (res.ok) {
         const { authorizedUsers } = (await res.json()) as { authorizedUsers?: unknown[] };
-        if (authorizedUsers && authorizedUsers.length > 0) return true;
+        if (authorizedUsers && authorizedUsers.length > 0) return;
       }
     } catch {
       // ignore transient errors, keep polling
     }
     await new Promise((r) => setTimeout(r, 400));
   }
-  return false;
+  throw new Error(`Delegation timeout: PDA ${pda} did not become active in TEE within ${timeoutMs}ms`);
 }
