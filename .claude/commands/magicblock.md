@@ -35,19 +35,21 @@ The TEE enforces: **every writable account in a transaction must have been deleg
 ## Delegation flow
 
 ```
-L1: delegate_ticket / delegate_queue  →  TEE picks up the account
-TEE: waitUntilPermissionActive(teeUrlWithToken, pda, 120000)
-  Polls: GET {teeUrl}/permission?pubkey={pda}   ← NO TOKEN (see critical note below)
-  Success: { authorizedUsers: ["<pubkey>"] }  (non-empty)
+L1: delegate_ticket / delegate_queue  →  TEE picks up the account (within seconds)
+TEE: waitUntilPermissionActive(teeUrlWithToken, pda, 15000)
+  INFORMATIONAL ONLY — returns false for DELeGG delegation (see critical note)
+  Real failure signal = TEE transaction failing, not this poll
 TEE: send instructions using teeRpc (same Kit RPC, different URL)
 L1: commit_tickets / commit_queue  →  changes written back to L1
 ```
 
-**CRITICAL — permission polling must NOT include the auth token.**
-- `GET /permission?pubkey={pda}` → returns global delegation activation status
-- `GET /permission?token={jwt}&pubkey={pda}` → returns per-user access for that JWT owner (ALWAYS empty unless explicitly granted; this is NOT what we want)
-- The reference implementation (`anchor-rock-paper-scissor`) confirms: `waitUntilPermissionActive(ephemeralRpcEndpoint, pda)` — no token.
-- Our `waitUntilPermissionActive` always strips the token from the URL before polling.
+**CRITICAL — `authorizedUsers` is ONLY for PER-group delegation, never for DELeGG.**
+- This project uses **DELeGG** (`DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`) not PER groups
+- `GET /permission?pubkey={pda}` always returns `{"authorizedUsers":null}` for DELeGG accounts
+- `authorizedUsers` only works with `createDelegatePermissionInstruction` (PER model, what reference RPS uses)
+- The reference `anchor-rock-paper-scissor` uses PER groups — that is why their `authorizedUsers` works
+- For DELeGG: accounts are live on TEE within seconds of L1 confirmation — `waitUntilPermissionActive` is a no-op best-effort check
+- The official SDK also returns `false` on timeout and continues (5s default timeout)
 
 ## Common errors
 
@@ -58,7 +60,7 @@ L1: commit_tickets / commit_queue  →  changes written back to L1
 | `NetworkMismatch` / `UserKeyring not found` | `StandardWalletAdapter` chain check failing | Bypass adapter; use `@wallet-standard/react` directly |
 | `signedMsg.signatures[addr]` is undefined | Kit signMessages returns `signedMsg[addr]`, not under `.signatures` | Use `signedMsg[signer.address]` |
 | `BigInt serialization` in `JSON.stringify` | Kit error objects may contain BigInt | Use replacer: `(_, v) => typeof v === 'bigint' ? v.toString() : v` |
-| Delegation activation timeout | `waitUntilPermissionActive` polling with auth token | Must use `/permission?pubkey=Y` WITHOUT token — token-scoped endpoint returns per-user access (always empty), not global delegation status |
+| `waitUntilPermissionActive` always times out | `authorizedUsers` is null for DELeGG delegation | This is expected for DELeGG — the function is informational, not a gate. TEE accounts are live within seconds of L1 tx confirmation. Do NOT make this throw. |
 
 ## Useful commands
 
