@@ -4,7 +4,7 @@ You are a MagicBlock Ephemeral Rollups expert helping debug and develop Solana p
 
 This project uses MagicBlock Ephemeral Rollups for TEE delegation:
 - **L1**: devnet Solana (`https://api.devnet.solana.com`)
-- **TEE RPC**: `https://devnet.magicblock.app` (or configured `TEE_RPC_URL`)
+- **TEE RPC**: `https://tee.magicblock.app` (or configured `TEE_RPC_URL`) — Private ER/TEE endpoint. NOT `devnet.magicblock.app` which is the standard (non-TEE) ER.
 - **Delegation program**: `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`
 - **SDK** (Kit-based): `sdk/src/` — `admin.ts`, `player.ts`, `tee.ts`, `transaction.ts`
 - **Test**: `tests/auto-match.ts`
@@ -58,17 +58,17 @@ L1: commit_tickets / commit_queue  →  changes written back to L1
 
 Check TEE auth (from test env):
 ```bash
-curl "https://devnet.magicblock.app/auth/challenge?pubkey=<PUBKEY>"
+curl "https://tee.magicblock.app/auth/challenge?pubkey=<PUBKEY>"
 ```
 
 Check delegation status:
 ```bash
-curl "https://devnet.magicblock.app/permission?token=<JWT>&pubkey=<PDA>"
+curl "https://tee.magicblock.app/permission?token=<JWT>&pubkey=<PDA>"
 ```
 
 Check account on TEE RPC:
 ```bash
-curl -X POST "https://devnet.magicblock.app?token=<JWT>" \
+curl -X POST "https://tee.magicblock.app?token=<JWT>" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":["<PDA>",{"encoding":"jsonParsed"}]}'
 ```
