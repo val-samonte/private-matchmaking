@@ -7,6 +7,7 @@ import { WalletButton } from "@/components/WalletButton";
 import { ProfileCard } from "@/components/ProfileCard";
 import { CreateProfileButton } from "@/components/CreateProfileButton";
 import { MatchmakingButton } from "@/components/MatchmakingButton";
+import { SessionButton } from "@/components/SessionButton";
 import { GameBoard } from "@/components/GameBoard";
 import { usePlayerProfile } from "@/lib/hooks/usePlayerProfile";
 
@@ -77,6 +78,7 @@ function HomeContent() {
               {connected && hasProfile && (
                 <div className="space-y-6">
                   <ProfileCard />
+                  <SessionButton />
                   <MatchmakingButton onMatchFound={handleMatchFound} />
                 </div>
               )}
