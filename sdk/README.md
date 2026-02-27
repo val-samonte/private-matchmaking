@@ -35,10 +35,11 @@ await admin.initializeTenant(YOUR_GAME_PROGRAM_ID, {
   callbackDiscriminator,
 });
 
-// 2. Create and delegate queue to TEE
+// 2. Create and delegate queue to TEE (automatically sets up permission PDA)
 const authority = signer.address;
 await admin.initializeQueue(authority, tenantPda);
 await admin.delegateQueue(authority, validatorPubkey);
+// Queue is now a dark pool: only the queue authority's TEE token can read it
 
 // 3. After players have matched, flush opponent tickets + commit all to L1
 await admin.resolveMatches(queuePda, tenantPda, [p1TicketPda, p2TicketPda]);
@@ -83,7 +84,7 @@ const match = await player.pollForMatch(ticketPda);
 |---|---|
 | `initializeTenant(tenantProgramId, options?)` | Create Tenant PDA with ELO config and optional callback |
 | `initializeQueue(authority, tenant)` | Create Queue PDA linked to tenant |
-| `delegateQueue(authority, validator?)` | Delegate queue to TEE (makes it private) |
+| `delegateQueue(authority, validator?)` | Delegate queue to TEE + set up Permission PDA (only authority can read via TEE RPC) |
 | `flushMatches(queue, tenant, ticketPdas)` | Update opponent tickets from pending matches |
 | `commitTickets(tenant, ticketPdas)` | Push matched ticket state back to L1 |
 | `resolveMatches(queue, tenant, ticketPdas, settlementDelayMs?)` | High-level: flush + wait + commit |
@@ -97,7 +98,7 @@ const match = await player.pollForMatch(ticketPda);
 
 | Method | Description |
 |---|---|
-| `enterQueue(tenant, queue, playerData, teeRpc, teeUrlWithToken, validator?, callbackProgram?)` | High-level: create ticket → delegate → join queue |
+| `enterQueue(tenant, queue, playerData, teeRpc, teeUrlWithToken, validator?, callbackProgram?)` | High-level: create ticket → set up Permission PDA → delegate → join queue |
 | `createTicket(tenant)` | Create MatchTicket PDA on L1 |
 | `delegateTicket(player, tenant, validator?)` | Delegate ticket to TEE |
 | `joinQueue(queue, tenant, playerData, callbackProgram?)` | Join queue in TEE; callback fires via Tenant PDA on match |
@@ -110,6 +111,19 @@ const match = await player.pollForMatch(ticketPda);
 ### `getAuthToken(rpcUrl, signer)`
 
 Authenticate with the MagicBlock TEE. Returns `{ token, expiresAt }`. The token is passed as `?token=<jwt>` in the TEE RPC URL.
+
+### `waitForPermission(teeUrlWithToken, accountAddress, timeoutMs?)`
+
+Poll the TEE until the Permission PDA for `accountAddress` is active (i.e. TEE has picked up the delegated ACL). Returns `true` if confirmed within `timeoutMs` (default 10s), `false` on timeout. Useful after `delegateQueue` if you want to confirm the dark pool is enforced before sending players in.
+
+## Privacy Model
+
+Queue and ticket state is enforced at the **TEE RPC layer** by Permission PDAs:
+
+- **Queue** — only the queue authority's auth token can call `getAccountInfo` on the queue. Other authenticated wallets receive `null` (account not found).
+- **Tickets** — only the ticket owner and queue authority can read a ticket on TEE. Third parties read the committed L1 ticket after `resolveMatches`.
+
+This is enforced by the `ACLseo` permission program (`ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1`). Both `delegateQueue` and `enterQueue` set up these Permission PDAs automatically before delegating to TEE.
 
 ## How the Callback Works
 
