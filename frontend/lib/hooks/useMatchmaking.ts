@@ -108,7 +108,7 @@ export function useMatchmaking() {
               ...commitIx,
               accounts: [
                 ...commitIx.accounts,
-                { address: ticketPda, role: 3 /* WRITABLE */ },
+                { address: ticketPda, role: 1 /* AccountRole.WRITABLE */ },
               ],
             };
             await sendInstruction(cleanupTeeRpc, commitIxWithRemaining as any, kitWallet);
@@ -243,7 +243,7 @@ export function useMatchmaking() {
             ...flushIx,
             accounts: [
               ...flushIx.accounts,
-              ...opponentTicketPdas.map((addr) => ({ address: addr, role: 3 })),
+              ...opponentTicketPdas.map((addr) => ({ address: addr, role: 1 /* AccountRole.WRITABLE */ })),
             ],
           };
           await sendInstruction(teeRpc, flushIxWithRemaining as any, kitWallet);
@@ -257,7 +257,7 @@ export function useMatchmaking() {
             ...commitIx,
             accounts: [
               ...commitIx.accounts,
-              ...allTickets.map((addr) => ({ address: addr, role: 3 })),
+              ...allTickets.map((addr) => ({ address: addr, role: 1 /* AccountRole.WRITABLE */ })),
             ],
           };
           await sendInstruction(teeRpc, commitIxWithRemaining as any, kitWallet);

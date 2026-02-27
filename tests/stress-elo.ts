@@ -451,28 +451,53 @@ describe(`stress-elo (ELO window: ${ELO_WINDOW}, concurrent: ${N_CONCURRENT})`, 
     assert.ok(nearL1Matched, "pNear ticket should be Matched on L1 after commit");
     console.log("  ✓ Match confirmed on L1");
 
-    // ── Cleanup: cancel pFar's ticket ────────────────────────────────────
-    console.log("\nCancelling pFar's stranded ticket…");
+    // ── Cleanup: cancel pFar's stranded ticket and return it to L1 ───────
+    // Best-effort: use pFar's TEE session for both cancel AND commit so the
+    // commit_accounts() call sees the dirty state from cancelTicket.
+    console.log("\nCancelling pFar's stranded ticket (best-effort)…");
     const farTicketPda = await deriveTicketPda(pFar.address, seqTenantPda);
-    const farCancelIx = await (await import("../sdk/src/generated/duel/index.js"))
-      .getCancelTicketInstructionAsync({ player: pFar, tenant: seqTenantPda });
-    await sendInstruction(createSolanaRpc(`${TEE_RPC_URL}?token=${tFar}`), farCancelIx, pFar);
+    const DELEGPROG = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh" as Address;
+    try {
+      const { getCancelTicketInstructionAsync, getCommitTicketsInstruction, getCloseTicketInstructionAsync } =
+        await import("../sdk/src/generated/duel/index.js");
+      const farTeeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${tFar}`);
 
-    // Commit the cancelled ticket back to L1
-    const { getCommitTicketsInstruction } = await import("../sdk/src/generated/duel/index.js");
-    const commitCancelIx = getCommitTicketsInstruction({ tenant: seqTenantPda, payer: seqQueueAuth });
-    const commitWithRemaining = {
-      ...commitCancelIx,
-      accounts: [...commitCancelIx.accounts, { address: farTicketPda, role: 3 as const }],
-    };
-    await sendInstruction(teeRpcAuth, commitWithRemaining as any, seqQueueAuth);
-    await new Promise(r => setTimeout(r, 5000));
+      // 1. Cancel on TEE using pFar's session
+      const farCancelIx = await getCancelTicketInstructionAsync({ player: pFar, tenant: seqTenantPda });
+      await sendInstruction(farTeeRpc, farCancelIx, pFar);
 
-    // Close pFar's ticket on L1
-    const { getCloseTicketInstructionAsync } = await import("../sdk/src/generated/duel/index.js");
-    const closeIx = await getCloseTicketInstructionAsync({ player: pFar, tenant: seqTenantPda });
-    await sendInstruction(l1Rpc, closeIx, pFar);
-    console.log("  ✓ pFar ticket cancelled and closed");
+      // 2. Commit using pFar's session (same dirty-set as the cancel)
+      const commitCancelIx = getCommitTicketsInstruction({ tenant: seqTenantPda, payer: pFar });
+      const commitWithRemaining = {
+        ...commitCancelIx,
+        accounts: [...commitCancelIx.accounts, { address: farTicketPda, role: AccountRole.WRITABLE }],
+      };
+      await sendInstruction(farTeeRpc, commitWithRemaining as any, pFar);
+
+      // 3. Poll L1 until ticket returns (owner changes from delegation program)
+      console.log("  Waiting for pFar ticket to return to L1…");
+      let returnedToL1 = false;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const info = await l1Rpc.getAccountInfo(farTicketPda, { encoding: "base64" }).send();
+        if (!info.value || info.value.owner !== DELEGPROG) {
+          console.log(`  Ticket back on L1 after ${(i + 1) * 2}s`);
+          returnedToL1 = true;
+          break;
+        }
+      }
+
+      // 4. Close on L1 if returned
+      if (returnedToL1) {
+        const closeIx = await getCloseTicketInstructionAsync({ player: pFar, tenant: seqTenantPda });
+        await sendInstruction(l1Rpc, closeIx, pFar);
+        console.log("  ✓ pFar ticket cancelled and closed");
+      } else {
+        console.log("  ⚠ pFar ticket did not return to L1 within 60s — skipping close (stale, will be cleaned up on next run)");
+      }
+    } catch (cleanupErr: any) {
+      console.warn("  ⚠ pFar cleanup failed (best-effort, not blocking test):", cleanupErr.message);
+    }
   });
 
   // ── Concurrent scenario ───────────────────────────────────────────────────
