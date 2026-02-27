@@ -5,7 +5,7 @@ import { useAtomValue } from "jotai";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
 import { useWalletContext } from "@/lib/contexts/WalletContext";
-import { getTeeAuthToken, waitForDelegation } from "@/lib/utils/tee";
+import { getTeeAuthToken } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction, sendInstructions } from "@/lib/utils/transaction";
 import { deriveQueuePda, deriveTenantPda, deriveTicketPda } from "@/lib/utils/pda";
@@ -21,6 +21,7 @@ import {
 import {
   getCreateTicketInstructionAsync,
   getDelegateTicketInstructionAsync,
+  getSetupTicketPermissionInstructionAsync,
   getJoinQueueInstructionAsync,
   getFlushMatchesInstruction,
   getCommitTicketsInstruction,
@@ -30,7 +31,13 @@ import {
   fetchQueue,
 } from "@sdk/generated/duel";
 import { accountType } from "@sdk/generated/duel/types";
-import { createSolanaRpc } from "@solana/kit";
+import {
+  PERMISSION_PROGRAM,
+  DELEGATION_PROGRAM as PERM_DELEGATION_PROGRAM,
+  derivePermissionPda,
+  derivePermissionDelegationPdas,
+} from "@sdk/utils";
+import { createSolanaRpc, AccountRole, type Address, type Instruction } from "@solana/kit";
 
 type MatchmakingState =
   | "idle"
@@ -141,8 +148,44 @@ export function useMatchmaking() {
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 3. Delegate ticket to TEE
+      // 3. Set up Permission PDA for the ticket (enforces TEE read access control)
       setState("delegating");
+      console.log("Setting up Permission PDA...");
+      const permissionPda = await derivePermissionPda(ticketPda);
+      const setupPermIx = await getSetupTicketPermissionInstructionAsync({
+        player: signer,
+        tenant: tenantPda,
+        permission: permissionPda,
+        permissionProgram: PERMISSION_PROGRAM,
+      });
+      await sendInstruction(rpc, setupPermIx, kitWallet);
+
+      // 3b. Delegate Permission PDA to TEE
+      console.log("Delegating Permission PDA to TEE...");
+      const { delegationBuffer, delegationRecord, delegationMetadata } =
+        await derivePermissionDelegationPdas(permissionPda);
+      const delegatePermIx: Instruction = {
+        programAddress: PERMISSION_PROGRAM,
+        data: new Uint8Array([3, 0, 0, 0, 0, 0, 0, 0]),
+        accounts: [
+          { address: signer.address, role: AccountRole.WRITABLE_SIGNER },
+          { address: signer.address, role: AccountRole.READONLY_SIGNER },
+          { address: ticketPda, role: AccountRole.READONLY },
+          { address: permissionPda, role: AccountRole.WRITABLE },
+          { address: "11111111111111111111111111111111" as Address, role: AccountRole.READONLY },
+          { address: PERMISSION_PROGRAM, role: AccountRole.READONLY },
+          { address: delegationBuffer, role: AccountRole.WRITABLE },
+          { address: delegationRecord, role: AccountRole.WRITABLE },
+          { address: delegationMetadata, role: AccountRole.WRITABLE },
+          { address: PERM_DELEGATION_PROGRAM, role: AccountRole.READONLY },
+          { address: ER_VALIDATOR, role: AccountRole.READONLY },
+        ],
+      };
+      await sendInstruction(rpc, delegatePermIx, kitWallet);
+
+      if (signal.aborted) throw new Error("Search cancelled");
+
+      // 4. Delegate ticket to TEE
       console.log("Delegating ticket to TEE...");
       const delegateIx = await getDelegateTicketInstructionAsync({
         pda: ticketPda,
@@ -152,16 +195,13 @@ export function useMatchmaking() {
       });
       await sendInstruction(rpc, delegateIx, kitWallet);
 
-      // 4. Get TEE auth token and wait for activation
+      // 5. Get TEE auth token
       console.log("Authenticating with TEE...");
       const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
 
-      console.log("Waiting for ticket TEE activation...");
-      await waitForDelegation(TEE_RPC_URL, token, ticketPda);
-
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 5. Join queue via TEE
+      // 6. Join queue via TEE
       setState("joining");
       console.log("Joining queue via TEE...");
       const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
@@ -182,7 +222,7 @@ export function useMatchmaking() {
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 6. Flush pending matches + commit tickets (crank duty)
+      // 7. Flush pending matches + commit tickets (crank duty)
       try {
         const queueAccount = await fetchQueue(teeRpc, queuePda);
         const pendingMatches = queueAccount.data.pendingMatches;
@@ -231,7 +271,7 @@ export function useMatchmaking() {
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 7. Poll L1 for match (watching ticket PDA)
+      // 8. Poll L1 for match (watching ticket PDA)
       setState("searching");
       console.log("Waiting for match (watching L1 ticket)...");
 

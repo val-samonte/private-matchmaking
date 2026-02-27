@@ -1,4 +1,4 @@
-import type { Address } from "@solana/kit";
+import { getBase58Decoder, type Address } from "@solana/kit";
 import type { KitWallet } from "./wallet-bridge";
 
 const DELEGATION_PROGRAM = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
@@ -18,26 +18,29 @@ export async function getTeeAuthToken(
   if (!challengeRes.ok) {
     throw new Error(`TEE challenge failed: ${challengeRes.statusText}`);
   }
-  const { challenge } = await challengeRes.json();
+  const { challenge } = await challengeRes.json() as { challenge: string };
 
   // 2. Sign challenge bytes with wallet
-  const challengeBytes = new TextEncoder().encode(challenge as string);
+  const challengeBytes = new TextEncoder().encode(challenge);
   const sig = await wallet.signMessage(challengeBytes);
 
-  // 3. POST signature to get token
-  const tokenRes = await fetch(`${rpcUrl}/auth/token`, {
+  // 3. POST signature (base58-encoded) to get token
+  const signatureString = getBase58Decoder().decode(sig);
+  const tokenRes = await fetch(`${rpcUrl}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       pubkey: wallet.address,
       challenge,
-      signature: Array.from(sig),
+      signature: signatureString,
     }),
   });
-  if (!tokenRes.ok) {
-    throw new Error(`TEE token request failed: ${tokenRes.statusText}`);
+  const authJson = await tokenRes.json() as { token: string; expiresAt?: number; error?: string };
+  if (tokenRes.status !== 200) {
+    throw new Error(`TEE auth failed: ${authJson.error}`);
   }
-  return tokenRes.json();
+  const expiresAt = authJson.expiresAt ?? Date.now() + 1000 * 60 * 60 * 24 * 30;
+  return { token: authJson.token, expiresAt };
 }
 
 /**
