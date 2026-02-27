@@ -279,70 +279,75 @@ pub mod duel {
                 let new_player_idx = queue.entries.len() - 1;
                 let new_player = queue.entries[new_player_idx];
 
+                // Find the closest-ELO opponent within the window (not just the first).
+                let mut best_match: Option<(usize, u64)> = None; // (index, diff)
                 for i in 0..new_player_idx {
                     let other_player = queue.entries[i];
-                    let diff = if new_player.elo > other_player.elo {
-                        new_player.elo - other_player.elo
-                    } else {
-                        other_player.elo - new_player.elo
-                    };
+                    let diff = new_player.elo.abs_diff(other_player.elo);
 
                     if diff <= window {
-                        // Match found!
-                        let timestamp = Clock::get()?.unix_timestamp;
-                        queue.match_counter += 1;
-                        let match_id = queue.match_counter;
-
-                        msg!(
-                            "Auto-Match Found: {} (ELO {}) vs {} (ELO {}), match_id: {}",
-                            new_player.player,
-                            new_player.elo,
-                            other_player.player,
-                            other_player.elo,
-                            match_id
-                        );
-
-                        // Emit event
-                        emit!(MatchFound {
-                            player1: new_player.player,
-                            player2: other_player.player,
-                            match_id,
-                            timestamp,
-                        });
-
-                        // Store in matches list (keep last 10)
-                        let match_entry = MatchEntry {
-                            player1: new_player.player,
-                            player2: other_player.player,
-                            match_id,
-                            timestamp,
-                        };
-                        queue.matches.push(match_entry);
-                        if queue.matches.len() > 10 {
-                            queue.matches.remove(0);
+                        if best_match.map_or(true, |(_, best_diff)| diff < best_diff) {
+                            best_match = Some((i, diff));
                         }
-
-                        // Update the joining player's ticket (we have it as an account)
-                        let player_ticket = &mut ctx.accounts.player_ticket;
-                        player_ticket.status = TicketStatus::Matched {
-                            opponent: other_player.player,
-                            match_id,
-                        };
-
-                        // Store a PendingMatch for the opponent (their ticket isn't available here)
-                        queue.pending_matches.push(PendingMatch {
-                            player: other_player.player,
-                            opponent: new_player.player,
-                            match_id,
-                        });
-
-                        // Remove both players from queue (remove higher index first)
-                        queue.entries.remove(new_player_idx);
-                        queue.entries.remove(i);
-
-                        found_match = Some((new_player.player, other_player.player, match_id));
-                        break;
                     }
+                }
+
+                if let Some((best_idx, _)) = best_match {
+                    let other_player = queue.entries[best_idx];
+
+                    // Match found!
+                    let timestamp = Clock::get()?.unix_timestamp;
+                    queue.match_counter += 1;
+                    let match_id = queue.match_counter;
+
+                    msg!(
+                        "Auto-Match Found: {} (ELO {}) vs {} (ELO {}), match_id: {}",
+                        new_player.player,
+                        new_player.elo,
+                        other_player.player,
+                        other_player.elo,
+                        match_id
+                    );
+
+                    // Emit event
+                    emit!(MatchFound {
+                        player1: new_player.player,
+                        player2: other_player.player,
+                        match_id,
+                        timestamp,
+                    });
+
+                    // Store in matches list (keep last 10)
+                    let match_entry = MatchEntry {
+                        player1: new_player.player,
+                        player2: other_player.player,
+                        match_id,
+                        timestamp,
+                    };
+                    queue.matches.push(match_entry);
+                    if queue.matches.len() > 10 {
+                        queue.matches.remove(0);
+                    }
+
+                    // Update the joining player's ticket (we have it as an account)
+                    let player_ticket = &mut ctx.accounts.player_ticket;
+                    player_ticket.status = TicketStatus::Matched {
+                        opponent: other_player.player,
+                        match_id,
+                    };
+
+                    // Store a PendingMatch for the opponent (their ticket isn't available here)
+                    queue.pending_matches.push(PendingMatch {
+                        player: other_player.player,
+                        opponent: new_player.player,
+                        match_id,
+                    });
+
+                    // Remove both players from queue (remove higher index first)
+                    queue.entries.remove(new_player_idx);
+                    queue.entries.remove(best_idx);
+
+                    found_match = Some((new_player.player, other_player.player, match_id));
                 }
             }
         } // mutable borrows released here
