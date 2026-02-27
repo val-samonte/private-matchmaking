@@ -10,6 +10,8 @@ import { getTeeAuthToken, waitForDelegation } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction } from "@/lib/utils/transaction";
 import { derivePlayerProfilePda, deriveTicketPda, deriveTenantPda, deriveGameSessionPda } from "@/lib/utils/pda";
+import { useSession } from "@/lib/contexts/SessionContext";
+import { deriveSessionTokenPda } from "@/lib/utils/session";
 import {
   RPS_GAME_PROGRAM_ID,
   TEE_RPC_URL,
@@ -52,6 +54,7 @@ function toCodamaChoice(choice: Choice): CodamaChoice {
 
 export function useGameSession() {
   const { publicKey, kitWallet } = useWalletContext();
+  const { sessionKitWallet, isSessionActive } = useSession();
   const rpc = useAtomValue(rpcAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
 
@@ -151,11 +154,18 @@ export function useGameSession() {
 
       console.log("Making choice:", choice);
 
-      // Get TEE auth token and provider
+      // TEE auth always uses the real wallet (session key doesn't change TEE identity)
       const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
       const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
 
-      const signer = walletToSigner(kitWallet);
+      // Use session key for signing when available — no wallet popup required
+      const moveWallet = (isSessionActive && sessionKitWallet) ? sessionKitWallet : kitWallet;
+      const signer = walletToSigner(moveWallet);
+
+      // When using session key: include its session token PDA so the program can verify
+      const sessionTokenPda = (isSessionActive && sessionKitWallet && publicKey)
+        ? await deriveSessionTokenPda(RPS_GAME_PROGRAM_ID, sessionKitWallet.address, publicKey as Address)
+        : undefined;
 
       // Derive opponent profile PDA
       const [opponentProfilePda] = await derivePlayerProfilePda(opponent, RPS_GAME_PROGRAM_ID);
@@ -169,12 +179,13 @@ export function useGameSession() {
         gameSession: gameSessionPda,
         player1Profile: player1ProfilePda,
         player2Profile: player2ProfilePda,
-        player: signer,
+        signer,
+        sessionToken: sessionTokenPda,
         choice: toCodamaChoice(choice),
       });
 
-      console.log("Submitting choice to TEE...");
-      await sendInstruction(teeRpc, choiceIx, kitWallet);
+      console.log(isSessionActive ? "Submitting choice via session key (no popup)..." : "Submitting choice to TEE...");
+      await sendInstruction(teeRpc, choiceIx, moveWallet);
       console.log("Choice submitted");
 
       // Poll for game completion
@@ -189,7 +200,7 @@ export function useGameSession() {
       setGameState("error");
       throw err;
     }
-  }, [publicKey, gameSessionPda, profilePda, opponent, gameId, kitWallet]);
+  }, [publicKey, gameSessionPda, profilePda, opponent, gameId, kitWallet, isSessionActive, sessionKitWallet]);
 
   const persistResults = useCallback(async () => {
     if (!publicKey || !gameSessionPda || !profilePda || !opponent || !kitWallet) {
