@@ -423,7 +423,7 @@ describe("web3-matchmaking-with-tickets", () => {
       gameSession: gameSessionPda,
       player1Profile: p1ProfilePda,
       player2Profile: p2ProfilePda,
-      player: player1,
+      signer: player1,
       choice: Choice.Rock,
     });
     await sendInstruction(teeRpc1, rockIx, player1);
@@ -435,7 +435,7 @@ describe("web3-matchmaking-with-tickets", () => {
       gameSession: gameSessionPda,
       player1Profile: p1ProfilePda,
       player2Profile: p2ProfilePda,
-      player: player2,
+      signer: player2,
       choice: Choice.Paper,
     });
     await sendInstruction(teeRpc2, paperIx, player2);

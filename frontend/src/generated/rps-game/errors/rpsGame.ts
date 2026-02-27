@@ -15,12 +15,16 @@ export const RPS_GAME_ERROR__ALREADY_CHOSE = 0x1770; // 6000
 export const RPS_GAME_ERROR__INVALID_PLAYER = 0x1771; // 6001
 /** InvalidMatchTicket: Invalid match ticket - not matched or wrong opponent */
 export const RPS_GAME_ERROR__INVALID_MATCH_TICKET = 0x1772; // 6002
+/** InvalidSession: Invalid session token */
+export const RPS_GAME_ERROR__INVALID_SESSION = 0x1773; // 6003
+/** SessionExpired: Session token expired */
+export const RPS_GAME_ERROR__SESSION_EXPIRED = 0x1774; // 6004
 
-export type RpsGameError = typeof RPS_GAME_ERROR__ALREADY_CHOSE | typeof RPS_GAME_ERROR__INVALID_MATCH_TICKET | typeof RPS_GAME_ERROR__INVALID_PLAYER;
+export type RpsGameError = typeof RPS_GAME_ERROR__ALREADY_CHOSE | typeof RPS_GAME_ERROR__INVALID_MATCH_TICKET | typeof RPS_GAME_ERROR__INVALID_PLAYER | typeof RPS_GAME_ERROR__INVALID_SESSION | typeof RPS_GAME_ERROR__SESSION_EXPIRED;
 
 let rpsGameErrorMessages: Record<RpsGameError, string> | undefined;
 if (process.env.NODE_ENV !== 'production') {
-  rpsGameErrorMessages = { [RPS_GAME_ERROR__ALREADY_CHOSE]: `Already chose`, [RPS_GAME_ERROR__INVALID_MATCH_TICKET]: `Invalid match ticket - not matched or wrong opponent`, [RPS_GAME_ERROR__INVALID_PLAYER]: `Invalid player` };
+  rpsGameErrorMessages = { [RPS_GAME_ERROR__ALREADY_CHOSE]: `Already chose`, [RPS_GAME_ERROR__INVALID_MATCH_TICKET]: `Invalid match ticket - not matched or wrong opponent`, [RPS_GAME_ERROR__INVALID_PLAYER]: `Invalid player`, [RPS_GAME_ERROR__INVALID_SESSION]: `Invalid session token`, [RPS_GAME_ERROR__SESSION_EXPIRED]: `Session token expired` };
 }
 
 export function getRpsGameErrorMessage(code: RpsGameError): string {

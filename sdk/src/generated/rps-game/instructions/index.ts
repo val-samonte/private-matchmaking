@@ -13,5 +13,7 @@ export * from './makeChoice';
 export * from './onMatchFound';
 export * from './persistResults';
 export * from './processUndelegation';
+export * from './setupGameSessionPermission';
+export * from './setupProfilePermission';
 export * from './startGame';
 export * from './startGameWithTicket';

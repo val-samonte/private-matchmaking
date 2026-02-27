@@ -164,7 +164,7 @@ async function seedGames(
       gameSession,
       player1Profile: winnerProfile,
       player2Profile: loserProfile,
-      player:  winner,
+      signer:  winner,
       choice:  Choice.Rock,
     });
     await sendInstruction(l1Rpc, rockIx, winner);
@@ -174,7 +174,7 @@ async function seedGames(
       gameSession,
       player1Profile: winnerProfile,
       player2Profile: loserProfile,
-      player:  loser,
+      signer:  loser,
       choice:  Choice.Scissors,
     });
     await sendInstruction(l1Rpc, scissorsIx, loser);

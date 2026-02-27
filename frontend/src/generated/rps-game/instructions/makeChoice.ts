@@ -6,7 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { combineCodec, fixDecoderSize, fixEncoderSize, getBytesDecoder, getBytesEncoder, getStructDecoder, getStructEncoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount } from '@solana/kit';
+import { combineCodec, fixDecoderSize, fixEncoderSize, getBytesDecoder, getBytesEncoder, getStructDecoder, getStructEncoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount } from '@solana/kit';
 import { getAccountMetaFactory, type ResolvedInstructionAccount } from '@solana/program-client-core';
 import { RPS_GAME_PROGRAM_ADDRESS } from '../programs';
 import { getChoiceDecoder, getChoiceEncoder, type Choice, type ChoiceArgs } from '../types';
@@ -15,8 +15,8 @@ export const MAKE_CHOICE_DISCRIMINATOR = new Uint8Array([207, 18, 251, 32, 135, 
 
 export function getMakeChoiceDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(MAKE_CHOICE_DISCRIMINATOR); }
 
-export type MakeChoiceInstruction<TProgram extends string = typeof RPS_GAME_PROGRAM_ADDRESS, TAccountGameSession extends string | AccountMeta<string> = string, TAccountPlayer1Profile extends string | AccountMeta<string> = string, TAccountPlayer2Profile extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountGameSession extends string ? WritableAccount<TAccountGameSession> : TAccountGameSession, TAccountPlayer1Profile extends string ? WritableAccount<TAccountPlayer1Profile> : TAccountPlayer1Profile, TAccountPlayer2Profile extends string ? WritableAccount<TAccountPlayer2Profile> : TAccountPlayer2Profile, TAccountPlayer extends string ? ReadonlySignerAccount<TAccountPlayer> & AccountSignerMeta<TAccountPlayer> : TAccountPlayer, ...TRemainingAccounts]>;
+export type MakeChoiceInstruction<TProgram extends string = typeof RPS_GAME_PROGRAM_ADDRESS, TAccountGameSession extends string | AccountMeta<string> = string, TAccountPlayer1Profile extends string | AccountMeta<string> = string, TAccountPlayer2Profile extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TAccountSessionToken extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountGameSession extends string ? WritableAccount<TAccountGameSession> : TAccountGameSession, TAccountPlayer1Profile extends string ? WritableAccount<TAccountPlayer1Profile> : TAccountPlayer1Profile, TAccountPlayer2Profile extends string ? WritableAccount<TAccountPlayer2Profile> : TAccountPlayer2Profile, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, TAccountSessionToken extends string ? ReadonlyAccount<TAccountSessionToken> : TAccountSessionToken, ...TRemainingAccounts]>;
 
 export type MakeChoiceInstructionData = { discriminator: ReadonlyUint8Array; choice: Choice;  };
 
@@ -34,20 +34,21 @@ export function getMakeChoiceInstructionDataCodec(): FixedSizeCodec<MakeChoiceIn
     return combineCodec(getMakeChoiceInstructionDataEncoder(), getMakeChoiceInstructionDataDecoder());
 }
 
-export type MakeChoiceInput<TAccountGameSession extends string = string, TAccountPlayer1Profile extends string = string, TAccountPlayer2Profile extends string = string, TAccountPlayer extends string = string> =  {
+export type MakeChoiceInput<TAccountGameSession extends string = string, TAccountPlayer1Profile extends string = string, TAccountPlayer2Profile extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   gameSession: Address<TAccountGameSession>;
 player1Profile: Address<TAccountPlayer1Profile>;
 player2Profile: Address<TAccountPlayer2Profile>;
-player: TransactionSigner<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 choice: MakeChoiceInstructionDataArgs["choice"];
 }
 
-export function getMakeChoiceInstruction<TAccountGameSession extends string, TAccountPlayer1Profile extends string, TAccountPlayer2Profile extends string, TAccountPlayer extends string, TProgramAddress extends Address = typeof RPS_GAME_PROGRAM_ADDRESS>(input: MakeChoiceInput<TAccountGameSession, TAccountPlayer1Profile, TAccountPlayer2Profile, TAccountPlayer>, config?: { programAddress?: TProgramAddress } ): MakeChoiceInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer1Profile, TAccountPlayer2Profile, TAccountPlayer> {
+export function getMakeChoiceInstruction<TAccountGameSession extends string, TAccountPlayer1Profile extends string, TAccountPlayer2Profile extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof RPS_GAME_PROGRAM_ADDRESS>(input: MakeChoiceInput<TAccountGameSession, TAccountPlayer1Profile, TAccountPlayer2Profile, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): MakeChoiceInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer1Profile, TAccountPlayer2Profile, TAccountSigner, TAccountSessionToken> {
   // Program address.
 const programAddress = config?.programAddress ?? RPS_GAME_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { gameSession: { value: input.gameSession ?? null, isWritable: true }, player1Profile: { value: input.player1Profile ?? null, isWritable: true }, player2Profile: { value: input.player2Profile ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: false } }
+const originalAccounts = { gameSession: { value: input.gameSession ?? null, isWritable: true }, player1Profile: { value: input.player1Profile ?? null, isWritable: true }, player2Profile: { value: input.player2Profile ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
@@ -58,7 +59,7 @@ const args = { ...input,  };
 
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("gameSession", accounts.gameSession), getAccountMeta("player1Profile", accounts.player1Profile), getAccountMeta("player2Profile", accounts.player2Profile), getAccountMeta("player", accounts.player)], data: getMakeChoiceInstructionDataEncoder().encode(args as MakeChoiceInstructionDataArgs), programAddress } as MakeChoiceInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer1Profile, TAccountPlayer2Profile, TAccountPlayer>);
+return Object.freeze({ accounts: [getAccountMeta("gameSession", accounts.gameSession), getAccountMeta("player1Profile", accounts.player1Profile), getAccountMeta("player2Profile", accounts.player2Profile), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getMakeChoiceInstructionDataEncoder().encode(args as MakeChoiceInstructionDataArgs), programAddress } as MakeChoiceInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer1Profile, TAccountPlayer2Profile, TAccountSigner, TAccountSessionToken>);
 }
 
 export type ParsedMakeChoiceInstruction<TProgram extends string = typeof RPS_GAME_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -66,13 +67,14 @@ accounts: {
 gameSession: TAccountMetas[0];
 player1Profile: TAccountMetas[1];
 player2Profile: TAccountMetas[2];
-player: TAccountMetas[3];
+signer: TAccountMetas[3];
+sessionToken?: TAccountMetas[4] | undefined;
 };
 data: MakeChoiceInstructionData; };
 
 export function parseMakeChoiceInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedMakeChoiceInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 4) {
-  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 4 });
+  if (instruction.accounts.length < 5) {
+  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 5 });
 }
 let accountIndex = 0;
 const getNextAccount = () => {
@@ -80,5 +82,9 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { gameSession: getNextAccount(), player1Profile: getNextAccount(), player2Profile: getNextAccount(), player: getNextAccount() }, data: getMakeChoiceInstructionDataDecoder().decode(instruction.data) };
+const getNextOptionalAccount = () => {
+  const accountMeta = getNextAccount();
+  return accountMeta.address === RPS_GAME_PROGRAM_ADDRESS ? undefined : accountMeta;
+};
+  return { programAddress: instruction.programAddress, accounts: { gameSession: getNextAccount(), player1Profile: getNextAccount(), player2Profile: getNextAccount(), signer: getNextAccount(), sessionToken: getNextOptionalAccount() }, data: getMakeChoiceInstructionDataDecoder().decode(instruction.data) };
 }

@@ -13,6 +13,53 @@ declare_id!("8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos");
 pub const PLAYER_PROFILE_SEED: &[u8] = b"player_profile_v35";
 pub const GAME_SESSION_SEED: &[u8] = b"game_session_v1";
 
+// Gum Session Keys — enables gasless game moves via ephemeral session signers.
+// SessionToken layout (owner: KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5):
+//   [0..8]   discriminator
+//   [8..40]  authority: Pubkey   (the real player's wallet)
+//   [40..72] target_program: Pubkey
+//   [72..104] session_signer: Pubkey  (the ephemeral keypair)
+//   [104..112] valid_until: i64 (unix timestamp)
+struct ParsedSessionToken {
+    authority: Pubkey,
+    target_program: Pubkey,
+    session_signer: Pubkey,
+    valid_until: i64,
+}
+
+fn parse_session_token(account: &AccountInfo) -> Result<ParsedSessionToken> {
+    let gum: Pubkey = "KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5"
+        .parse()
+        .unwrap();
+    require!(account.owner == &gum, GameError::InvalidSession);
+    let data = account.try_borrow_data()?;
+    require!(data.len() >= 112, GameError::InvalidSession);
+    let authority = Pubkey::new_from_array(data[8..40].try_into().unwrap());
+    let target_program = Pubkey::new_from_array(data[40..72].try_into().unwrap());
+    let session_signer = Pubkey::new_from_array(data[72..104].try_into().unwrap());
+    let valid_until = i64::from_le_bytes(data[104..112].try_into().unwrap());
+    Ok(ParsedSessionToken { authority, target_program, session_signer, valid_until })
+}
+
+/// Resolves the "real" player pubkey from either a session token or a direct signer.
+/// - No token: player == signer (direct wallet TX).
+/// - Token present: validates owner, target_program, expiry, and session_signer; returns authority.
+fn resolve_player<'a>(
+    signer_key: &Pubkey,
+    session_token: Option<&UncheckedAccount<'a>>,
+) -> Result<Pubkey> {
+    if let Some(token_account) = session_token {
+        let token = parse_session_token(token_account.as_ref())?;
+        let clock = Clock::get()?;
+        require!(token.session_signer == *signer_key, GameError::InvalidSession);
+        require!(token.target_program == crate::ID, GameError::InvalidSession);
+        require!(token.valid_until > clock.unix_timestamp, GameError::SessionExpired);
+        Ok(token.authority)
+    } else {
+        Ok(*signer_key)
+    }
+}
+
 #[ephemeral]
 #[program]
 pub mod rps_game {
@@ -47,8 +94,11 @@ pub mod rps_game {
 
     // 3️⃣ Make Choice
     pub fn make_choice(ctx: Context<MakeChoice>, choice: Choice) -> Result<()> {
+        let player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+        )?;
         let session = &mut ctx.accounts.game_session;
-        let player = ctx.accounts.player.key();
 
         if session.player1 == player {
              require!(session.player1_choice.is_none(), GameError::AlreadyChose);
@@ -308,7 +358,9 @@ pub struct MakeChoice<'info> {
     pub player1_profile: Account<'info, PlayerProfile>,
     #[account(mut, seeds = [PLAYER_PROFILE_SEED, game_session.player2.as_ref()], bump)]
     pub player2_profile: Account<'info, PlayerProfile>,
-    pub player: Signer<'info>,
+    pub signer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
 }
 
 #[commit]
@@ -447,6 +499,10 @@ pub enum GameError {
     InvalidPlayer,
     #[msg("Invalid match ticket - not matched or wrong opponent")]
     InvalidMatchTicket,
+    #[msg("Invalid session token")]
+    InvalidSession,
+    #[msg("Session token expired")]
+    SessionExpired,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
