@@ -1,56 +1,135 @@
-# Duel - Private Matchmaking on Solana
+# Duel — Private Matchmaking Protocol for Solana
 
-A complete privacy-focused matchmaking protocol built on Solana using MagicBlock's Ephemeral Rollups (TEE). This repository contains the on-chain programs, TypeScript SDK, and reference game implementation.
+A privacy-preserving, ELO-based matchmaking protocol built on Solana using [MagicBlock Ephemeral Rollups (TEE)](https://docs.magicblock.gg). Players are matched in a dark pool — the queue state is hidden from both L1 observers and unauthorized TEE users. Match results are settled on-chain and verifiable by anyone.
+
+**SDK:** [`@1upmonster/duel`](https://www.npmjs.com/package/@1upmonster/duel) on npm.
+
+---
 
 ## What's Inside
 
-This is a **monorepo** containing:
+| Path | Contents |
+|---|---|
+| `programs/duel/` | Core matchmaking protocol (Anchor) |
+| `programs/rps-game/` | Reference game — Rock Paper Scissors |
+| `sdk/` | TypeScript SDK (`@1upmonster/duel`) |
+| `tests/` | End-to-end integration tests |
+| `docs/integration-guide.md` | **Step-by-step guide for game developers** |
 
-1. **Anchor Programs** (`programs/`)
-   - `duel`: Core matchmaking protocol with TEE privacy
-   - `rps-game`: Reference Rock-Paper-Scissors game implementation
-   
-2. **TypeScript SDK** (`sdk/`)
-   - Published as `@1upmonster/duel` on NPM
-   - Client library for game owners and players
-   
-3. **Integration Tests** (`tests/`)
-   - Full end-to-end test suite demonstrating the complete flow
+---
 
-## Features
+## How It Works
 
-*   **Privacy-First:** Player ELO and queue status are hidden within a Trusted Execution Environment (TEE)
-*   **Client-Side Joining:** Players join queues directly from their wallets (no CPI required)
-*   **Automatic Matching:** TEE processes matches based on configurable ELO windows
-*   **Provable Fairness:** Matches are processed securely off-chain, with results settled on-chain
-*   **Game Agnostic:** Designed to work with any game program
+```
+Game Owner           Player                          Game Owner (crank)
+────────────         ─────────────────────────────   ──────────────────
+initializeTenant     getAuthToken (TEE)
+initializeQueue      delegate player account
+delegateQueue   →    enterQueue ──────────────────→  resolveMatches
+(dark pool)            createTicket (L1)               flushMatches (TEE)
+                       setup Permission PDA            commitTickets (L1)
+                       delegateTicket (TEE)         →  poll L1 for Matched
+                       joinQueue (TEE)
+```
 
-## Architecture
+- **Tenant** — your game's config: program ID, ELO layout, optional callback.
+- **Queue** — a TEE dark pool. Unauthorized wallets get `null` on `getAccountInfo`. Only the queue authority can read it.
+- **MatchTicket** — one PDA per player; carries `Searching → Matched` status. Committed to L1 after `resolveMatches`.
+- **Callback** — when a match is found, the duel program CPIs your game signed by the Tenant PDA (unforgeable).
 
-### Programs
+---
 
-1.  **Duel Program (`programs/duel`)**: The core matchmaking logic. It manages Tenants (game developers) and Queues. It runs as an Ephemeral Rollup for privacy.
-2.  **RPS Game (`programs/rps-game`)**: A reference implementation of a game using Duel. It demonstrates how a game program validates matched players and handles results.
+## Quick Start (SDK)
 
-### SDK
+```bash
+npm install @1upmonster/duel @solana/kit
+```
 
-3.  **SDK (`@1upmonster/duel`)**: A TypeScript client SDK that allows players to join queues directly from their wallets (no CPI required).
+### Game Owner Setup (one-time)
 
-### How It Works
+```ts
+import { MatchmakingAdmin, getAuthToken } from "@1upmonster/duel";
+import { createSolanaRpc, createKeyPairSignerFromBytes } from "@solana/kit";
+import * as crypto from "crypto";
 
-1.  **Queue Joining**: Players use the client SDK to join queues directly - no game program involvement needed
-2.  **Matching**: The TEE automatically processes matches based on ELO windows
-3.  **Game Integration**: Once matched, players interact with the game program (e.g., RPS Game)
+const rpc       = createSolanaRpc("https://api.devnet.solana.com");
+const authority = await createKeyPairSignerFromBytes(/* your keypair bytes */);
+const admin     = new MatchmakingAdmin(rpc, authority);
 
-## Prerequisites
+const callbackDiscriminator = Array.from(
+  crypto.createHash("sha256").update("global:on_match_found").digest().slice(0, 8)
+);
 
-*   [Solana Tool Suite](https://docs.solana.com/cli/install-solana-cli-tools)
-*   [Anchor Framework](https://www.anchor-lang.com/) v0.32.1+
-*   [Node.js](https://nodejs.org/) v16+ & [Yarn](https://yarnpkg.com/)
+await admin.initializeTenant(YOUR_GAME_PROGRAM_ID, {
+  eloOffset:             40,      // byte offset of ELO in your player account
+  eloDataType:           "u64",   // u8 | u16 | u32 | u64
+  eloWindow:             100n,    // max ELO diff to match
+  callbackProgramId:     YOUR_GAME_PROGRAM_ID,
+  callbackDiscriminator,
+});
 
-## Development Setup
+const tenantPda = await admin.getTenantPda(authority.address);
+await admin.initializeQueue(authority.address, tenantPda);
+await admin.delegateQueue(authority.address, ER_VALIDATOR); // sets up dark pool + delegates
+```
 
-### 1. Clone and Install
+### Player Flow
+
+```ts
+import { MatchmakingPlayer, getAuthToken } from "@1upmonster/duel";
+import { createSolanaRpc } from "@solana/kit";
+
+const l1Rpc = createSolanaRpc("https://api.devnet.solana.com");
+const { token } = await getAuthToken("https://tee.magicblock.app", player);
+const teeRpc  = createSolanaRpc(`https://tee.magicblock.app?token=${token}`);
+
+const client    = new MatchmakingPlayer(l1Rpc, player);
+const ticketPda = await client.enterQueue(
+  TENANT_PDA, QUEUE_PDA, playerProfilePda,
+  teeRpc, `https://tee.magicblock.app?token=${token}`,
+  ER_VALIDATOR, YOUR_GAME_PROGRAM_ID,
+);
+
+// Poll L1 after resolveMatches runs
+const match = await client.pollForMatch(ticketPda);
+// → { opponent: Address, matchId: bigint }
+```
+
+### Match Resolution (crank)
+
+```ts
+const { token } = await getAuthToken("https://tee.magicblock.app", authority);
+const teeRpc    = createSolanaRpc(`https://tee.magicblock.app?token=${token}`);
+const adminTee  = new MatchmakingAdmin(teeRpc, authority);
+
+await adminTee.resolveMatches(QUEUE_PDA, TENANT_PDA, [p1TicketPda, p2TicketPda]);
+```
+
+---
+
+## For Game Developers
+
+See **[`docs/integration-guide.md`](docs/integration-guide.md)** for the full step-by-step guide covering:
+
+- ELO byte offset calculation
+- Adding the callback to your Anchor program
+- Tenant and queue initialization
+- Player account delegation
+- Entering the queue and polling for matches
+- Match verification via MatchTicket (trustless, no oracle)
+- PDA derivation reference and byte layout
+
+---
+
+## Development
+
+### Prerequisites
+
+- [Solana Tool Suite](https://docs.solana.com/cli/install-solana-cli-tools)
+- [Anchor Framework](https://www.anchor-lang.com/) v0.32.1+
+- Node.js v18+
+
+### Setup
 
 ```bash
 git clone https://github.com/val-samonte/private-matchmaking.git
@@ -59,105 +138,55 @@ yarn install
 cd sdk && npm install && cd ..
 ```
 
-### 2. Build Programs
+### Build Programs
 
 ```bash
 anchor build
 ```
 
-This compiles both the `duel` and `rps-game` programs.
-
-### 3. Run Tests
+### Run Tests
 
 ```bash
-anchor test
+npx tsx node_modules/.bin/_mocha --timeout 1000000 tests/auto-match.ts tests/callback.ts
 ```
 
-The test suite demonstrates:
-- Tenant and queue initialization
-- TEE delegation
-- Player queue joining (client-side)
-- Automatic matching in TEE
-- Game session creation and play
-- Privacy verification (L1 vs TEE visibility)
+Tests cover the full flow end-to-end against devnet and the live TEE. Requires a funded wallet at `~/.config/solana/id.json`.
 
-### 4. Build SDK
+### Build SDK
 
 ```bash
-cd sdk
-npm run build
+cd sdk && npm run build
 ```
 
-## Using the SDK
-
-### Installation
-
-```bash
-npm install @1upmonster/duel
-```
-
-### For Game Owners
-
-```typescript
-import { MatchmakingAdmin } from "@1upmonster/duel";
-
-const admin = new MatchmakingAdmin(provider);
-
-// 1. Initialize Tenant for your Game Program
-await admin.initializeTenant(gameProgramId, {
-  authority,      // optional, defaults to gameProgramId
-  eloWindow: 200, // optional, default 100
-  eloOffset: 40,  // optional, default 40
-  eloDataType: 'u16' // optional, default 'u16' (u8/u16/u32/u64)
-});
-
-// 2. Initialize a Matchmaking Queue
-await admin.initializeQueue(authority, tenantPda);
-
-// 3. Delegate Queue to a TEE Validator
-await admin.delegateQueue(authority, validatorPubkey);
-```
-
-### For Players
-
-```typescript
-import { MatchmakingPlayer } from "@1upmonster/duel";
-
-const player = new MatchmakingPlayer(provider);
-
-// Join the private queue
-// Note: Actual matching happens automatically inside the TEE
-await player.joinQueue(queuePda, tenantPda, playerProfilePda);
-```
+---
 
 ## Repository Structure
 
 ```
 .
 ├── programs/
-│   ├── duel/              # Core matchmaking program
-│   │   ├── src/lib.rs     # Main program logic
-│   │   └── Cargo.toml
-│   └── rps-game/          # Reference game implementation
-│       ├── src/lib.rs
-│       └── Cargo.toml
-├── sdk/                   # TypeScript SDK (@1upmonster/duel)
+│   ├── duel/              # Core matchmaking protocol
+│   │   └── src/lib.rs
+│   └── rps-game/          # Reference game (Rock Paper Scissors)
+│       └── src/lib.rs
+├── sdk/                   # @1upmonster/duel — published to npm
 │   ├── src/
-│   │   ├── admin.ts       # Admin/owner functionality
-│   │   ├── player.ts      # Player functionality
-│   │   └── types.ts       # Generated types
+│   │   ├── admin.ts       # MatchmakingAdmin (game owner)
+│   │   ├── player.ts      # MatchmakingPlayer (player)
+│   │   ├── tee.ts         # getAuthToken, waitForPermission
+│   │   ├── utils.ts       # PDA derivation helpers
+│   │   └── generated/     # Codama-generated program clients
 │   └── package.json
 ├── tests/
-│   └── auto-match.ts      # Integration tests
-├── Anchor.toml            # Anchor configuration
-└── README.md              # This file
+│   ├── auto-match.ts      # Full matchmaking + game flow (8 tests)
+│   └── callback.ts        # CPI callback via Tenant PDA (4 tests)
+├── docs/
+│   └── integration-guide.md   # Game developer integration guide
+└── Anchor.toml
 ```
 
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+---
 
 ## License
 
-[MIT](LICENSE)
-
+MIT
