@@ -8,6 +8,7 @@ import { useWalletContext } from "@/lib/contexts/WalletContext";
 import { getTeeAuthToken } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction, sendInstructions } from "@/lib/utils/transaction";
+
 import { deriveQueuePda, deriveTenantPda, deriveTicketPda } from "@/lib/utils/pda";
 import {
   DUEL_PROGRAM_ID,
@@ -140,28 +141,26 @@ export function useMatchmaking() {
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 2. Create fresh MatchTicket on L1
-      console.log("Creating MatchTicket on L1...");
-      const createIx = await getCreateTicketInstructionAsync({ player: signer, tenant: tenantPda });
-      await sendInstruction(rpc, createIx, kitWallet);
-      console.log("Ticket created:", ticketPda);
-
-      if (signal.aborted) throw new Error("Search cancelled");
-
-      // 3. Set up Permission PDA for the ticket (enforces TEE read access control)
+      // TX A (1 wallet approval): createTicket + setupPermission
+      // createTicket init-s the PDA; setupPermission CPIs into it — valid in one TX.
       setState("delegating");
-      console.log("Setting up Permission PDA...");
+      console.log("Creating ticket + setting up permission (TX A)...");
       const permissionPda = await derivePermissionPda(ticketPda);
+      const createIx = await getCreateTicketInstructionAsync({ player: signer, tenant: tenantPda });
       const setupPermIx = await getSetupTicketPermissionInstructionAsync({
         player: signer,
         tenant: tenantPda,
         permission: permissionPda,
         permissionProgram: PERMISSION_PROGRAM,
       });
-      await sendInstruction(rpc, setupPermIx, kitWallet);
+      await sendInstructions(rpc, [createIx, setupPermIx], kitWallet);
+      console.log("Ticket created:", ticketPda);
 
-      // 3b. Delegate Permission PDA to TEE
-      console.log("Delegating Permission PDA to TEE...");
+      if (signal.aborted) throw new Error("Search cancelled");
+
+      // TX B (1 wallet approval): delegatePermission + delegateTicket
+      // Both are independent delegation calls; batching saves one round-trip.
+      console.log("Delegating permission + ticket (TX B)...");
       const { delegationBuffer, delegationRecord, delegationMetadata } =
         await derivePermissionDelegationPdas(permissionPda);
       const delegatePermIx: Instruction = {
@@ -181,19 +180,13 @@ export function useMatchmaking() {
           { address: ER_VALIDATOR, role: AccountRole.READONLY },
         ],
       };
-      await sendInstruction(rpc, delegatePermIx, kitWallet);
-
-      if (signal.aborted) throw new Error("Search cancelled");
-
-      // 4. Delegate ticket to TEE
-      console.log("Delegating ticket to TEE...");
       const delegateIx = await getDelegateTicketInstructionAsync({
         pda: ticketPda,
         payer: signer,
         validator: ER_VALIDATOR,
         accountType: accountType("Ticket", { player: publicKey, tenant: tenantPda }),
       });
-      await sendInstruction(rpc, delegateIx, kitWallet);
+      await sendInstructions(rpc, [delegatePermIx, delegateIx as any], kitWallet);
 
       // 5. Get TEE auth token
       console.log("Authenticating with TEE...");

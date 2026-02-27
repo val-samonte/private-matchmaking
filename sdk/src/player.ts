@@ -17,7 +17,7 @@ import {
   fetchMaybeMatchTicket,
   accountType,
 } from "./generated/duel/index.js";
-import { sendInstruction } from "./transaction.js";
+import { sendInstruction, sendInstructions } from "./transaction.js";
 import * as utils from "./utils.js";
 
 const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
@@ -148,22 +148,27 @@ export class MatchmakingPlayer {
     const player = this.signer.address as Address;
     const ticketPda = await this.getTicketPda(player, tenant);
 
-    // 1. Create ticket on L1
-    await this.createTicket(tenant);
-
-    // 2. Create Permission PDA for the ticket (CPI from duel program with invoke_signed)
+    // Derive all PDAs upfront so both batched TXs can be built in parallel
     const permissionPda = await utils.derivePermissionPda(ticketPda);
+    const { delegationBuffer, delegationRecord, delegationMetadata } =
+      await utils.derivePermissionDelegationPdas(permissionPda);
+
+    // TX A (1 wallet approval): createTicket + setupPermission
+    // createTicket init-s the PDA; setupPermission CPIs into it — valid in one TX.
+    const createIx = await getCreateTicketInstructionAsync({
+      player: this.signer,
+      tenant,
+    }, { programAddress: this.programId });
     const setupIx = await getSetupTicketPermissionInstructionAsync({
       player: this.signer,
       tenant,
       permission: permissionPda,
       permissionProgram: utils.PERMISSION_PROGRAM,
     }, { programAddress: this.programId });
-    await sendInstruction(this.rpc, setupIx, this.signer);
+    await sendInstructions(this.rpc, [createIx, setupIx], this.signer);
 
-    // 3. Delegate Permission PDA to TEE (called on permission program, player signs)
-    const { delegationBuffer, delegationRecord, delegationMetadata } =
-      await utils.derivePermissionDelegationPdas(permissionPda);
+    // TX B (1 wallet approval): delegatePermission + delegateTicket
+    // Both are independent delegation calls; batching saves one round-trip.
     const delegatePermIx: Instruction = {
       programAddress: utils.PERMISSION_PROGRAM,
       data: new Uint8Array([3, 0, 0, 0, 0, 0, 0, 0]),
@@ -181,12 +186,15 @@ export class MatchmakingPlayer {
         ...(validator ? [{ address: validator, role: AccountRole.READONLY }] : []),
       ],
     };
-    await sendInstruction(this.rpc, delegatePermIx, this.signer);
+    const delegateTicketIx = await getDelegateTicketInstructionAsync({
+      pda: ticketPda,
+      payer: this.signer,
+      validator,
+      accountType: accountType("Ticket", { player, tenant }),
+    }, { programAddress: this.programId });
+    await sendInstructions(this.rpc, [delegatePermIx, delegateTicketIx as Instruction], this.signer);
 
-    // 4. Delegate ticket to TEE
-    await this.delegateTicket(player, tenant, validator);
-
-    // 5. Join the queue on TEE
+    // TX C (TEE, 1 approval): joinQueue
     const teeClient = new MatchmakingPlayer(teeRpc, this.signer, this.programId);
     await teeClient.joinQueue(queue, tenant, playerData, callbackProgram);
 
