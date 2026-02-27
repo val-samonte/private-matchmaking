@@ -29,6 +29,32 @@ export const GUM_SESSION_KEYS_PROGRAM =
 const CREATE_SESSION_DISCRIMINATOR = new Uint8Array([242, 193, 143, 179, 150, 25, 122, 227]);
 
 /**
+ * SOL transferred to the session key when a session is created.
+ * Covers ~100 TEE game-move transactions at ~5 000 lamports each.
+ */
+export const SESSION_FUND_LAMPORTS = 500_000n; // 0.0005 SOL
+
+/** System Program transfer instruction — no external package required. */
+function buildSystemTransferInstruction(
+  from: Address,
+  to: Address,
+  lamports: bigint,
+): Instruction {
+  // System Program Transfer opcode = 2 (u32 LE), followed by lamports (u64 LE)
+  const data = new Uint8Array(12);
+  new DataView(data.buffer).setUint32(0, 2, true);
+  new DataView(data.buffer).setBigUint64(4, lamports, true);
+  return {
+    programAddress: "11111111111111111111111111111111" as Address,
+    data,
+    accounts: [
+      { address: from, role: AccountRole.WRITABLE_SIGNER },
+      { address: to, role: AccountRole.WRITABLE },
+    ],
+  };
+}
+
+/**
  * Derive the Gum SessionToken PDA.
  * Seeds: ["session_token", target_program, session_signer, authority]
  * Program: GUM_SESSION_KEYS_PROGRAM
@@ -147,12 +173,19 @@ export async function sendCreateSessionTx(
 
   const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
 
+  const fundIx = buildSystemTransferInstruction(
+    wallet.address as Address,
+    sessionKey.address,
+    SESSION_FUND_LAMPORTS,
+  );
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const msg: any = pipe(
     createTransactionMessage({ version: 0 as const }),
     (m) => setTransactionMessageFeePayer(wallet.address, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
     (m) => appendTransactionMessageInstruction(ix, m),
+    (m) => appendTransactionMessageInstruction(fundIx, m),
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
