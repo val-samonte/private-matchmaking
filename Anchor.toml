@@ -21,3 +21,8 @@ test = "npx tsx node_modules/.bin/_mocha --timeout 1000000 tests/auto-match.ts t
 init-queue = "npx tsx scripts/init-queue.ts"
 check-queue = "npx tsx scripts/check-queue-status.ts"
 generate-tenant-authority = "npx tsx scripts/generate-tenant-authority.ts"
+# If anchor deploy fails with "Buffer account data size too small":
+#   1. Close any stale buffers: solana program show --buffers --url devnet
+#                               solana program close <BUFFER_ADDRESS> --url devnet
+#   2. Extend program buffers:  solana program extend EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X 102400 --url devnet
+#                               solana program extend 8ohu3RobXyZ2DebyJjbs2co9YCG275FUsVckEcmDbCos 102400 --url devnet

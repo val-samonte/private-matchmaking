@@ -1,14 +1,17 @@
 import {
   createSolanaRpc,
+  AccountRole,
   type Address,
   type TransactionSigner,
   type Rpc,
   type SolanaRpcApi,
+  type Instruction,
 } from "@solana/kit";
 import {
   getInitializeTenantInstructionAsync,
   getInitializeQueueInstructionAsync,
   getDelegateQueueInstructionAsync,
+  getSetupQueuePermissionInstructionAsync,
   getFlushMatchesInstruction,
   getCommitTicketsInstruction,
   fetchQueue,
@@ -114,6 +117,39 @@ export class MatchmakingAdmin {
     validator?: Address,
   ): Promise<string> {
     const queuePda = await this.getQueuePda(authority);
+
+    // 1. Create Permission PDA for the queue (CPI from duel program with invoke_signed)
+    const permissionPda = await utils.derivePermissionPda(queuePda);
+    const setupIx = await getSetupQueuePermissionInstructionAsync({
+      authority: this.signer,
+      permission: permissionPda,
+      permissionProgram: utils.PERMISSION_PROGRAM,
+    }, { programAddress: this.programId });
+    await sendInstruction(this.rpc, setupIx, this.signer);
+
+    // 2. Delegate Permission PDA to TEE (called on permission program, authority signs)
+    const { delegationBuffer, delegationRecord, delegationMetadata } =
+      await utils.derivePermissionDelegationPdas(permissionPda);
+    const delegatePermIx: Instruction = {
+      programAddress: utils.PERMISSION_PROGRAM,
+      data: new Uint8Array([3, 0, 0, 0, 0, 0, 0, 0]), // discriminator = 3 (DelegatePermission)
+      accounts: [
+        { address: this.signer.address, role: AccountRole.WRITABLE_SIGNER },           // payer
+        { address: this.signer.address, role: AccountRole.READONLY_SIGNER },            // authority
+        { address: queuePda, role: AccountRole.READONLY },                              // permissionedAccount (not signer)
+        { address: permissionPda, role: AccountRole.WRITABLE },                         // permission PDA
+        { address: "11111111111111111111111111111111" as Address, role: AccountRole.READONLY }, // system_program
+        { address: utils.PERMISSION_PROGRAM, role: AccountRole.READONLY },              // owner_program
+        { address: delegationBuffer, role: AccountRole.WRITABLE },
+        { address: delegationRecord, role: AccountRole.WRITABLE },
+        { address: delegationMetadata, role: AccountRole.WRITABLE },
+        { address: utils.DELEGATION_PROGRAM, role: AccountRole.READONLY },
+        ...(validator ? [{ address: validator, role: AccountRole.READONLY }] : []),
+      ],
+    };
+    await sendInstruction(this.rpc, delegatePermIx, this.signer);
+
+    // 3. Delegate queue PDA to TEE (existing DELeGG flow)
     const ix = await getDelegateQueueInstructionAsync({
       pda: queuePda,
       payer: this.signer,

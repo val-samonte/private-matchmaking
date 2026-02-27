@@ -1,13 +1,16 @@
 import {
   createSolanaRpc,
+  AccountRole,
   type Address,
   type TransactionSigner,
   type Rpc,
   type SolanaRpcApi,
+  type Instruction,
 } from "@solana/kit";
 import {
   getCreateTicketInstructionAsync,
   getDelegateTicketInstructionAsync,
+  getSetupTicketPermissionInstructionAsync,
   getJoinQueueInstructionAsync,
   getCancelTicketInstructionAsync,
   getCloseTicketInstructionAsync,
@@ -15,7 +18,6 @@ import {
   accountType,
 } from "./generated/duel/index.js";
 import { sendInstruction } from "./transaction.js";
-import { waitUntilPermissionActive } from "./tee.js";
 import * as utils from "./utils.js";
 
 const DUEL_PROGRAM_ID = "EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X" as Address;
@@ -130,7 +132,8 @@ export class MatchmakingPlayer {
 
   /**
    * High-level: full matchmaking TEE entry flow.
-   * Creates ticket on L1, delegates it to TEE, waits for activation, then joins the queue.
+   * Creates ticket on L1, sets up permission PDA (so only player + queue authority can read it),
+   * delegates the permission PDA and ticket to TEE, then joins the queue.
    * Use individual methods (createTicket, delegateTicket, joinQueue) as escape hatches if needed.
    */
   async enterQueue(
@@ -145,10 +148,45 @@ export class MatchmakingPlayer {
     const player = this.signer.address as Address;
     const ticketPda = await this.getTicketPda(player, tenant);
 
+    // 1. Create ticket on L1
     await this.createTicket(tenant);
-    await this.delegateTicket(player, tenant, validator);
-    await waitUntilPermissionActive(teeUrlWithToken, ticketPda);
 
+    // 2. Create Permission PDA for the ticket (CPI from duel program with invoke_signed)
+    const permissionPda = await utils.derivePermissionPda(ticketPda);
+    const setupIx = await getSetupTicketPermissionInstructionAsync({
+      player: this.signer,
+      tenant,
+      permission: permissionPda,
+      permissionProgram: utils.PERMISSION_PROGRAM,
+    }, { programAddress: this.programId });
+    await sendInstruction(this.rpc, setupIx, this.signer);
+
+    // 3. Delegate Permission PDA to TEE (called on permission program, player signs)
+    const { delegationBuffer, delegationRecord, delegationMetadata } =
+      await utils.derivePermissionDelegationPdas(permissionPda);
+    const delegatePermIx: Instruction = {
+      programAddress: utils.PERMISSION_PROGRAM,
+      data: new Uint8Array([3, 0, 0, 0, 0, 0, 0, 0]),
+      accounts: [
+        { address: this.signer.address, role: AccountRole.WRITABLE_SIGNER },
+        { address: this.signer.address, role: AccountRole.READONLY_SIGNER },
+        { address: ticketPda, role: AccountRole.READONLY },
+        { address: permissionPda, role: AccountRole.WRITABLE },
+        { address: "11111111111111111111111111111111" as Address, role: AccountRole.READONLY },
+        { address: utils.PERMISSION_PROGRAM, role: AccountRole.READONLY },
+        { address: delegationBuffer, role: AccountRole.WRITABLE },
+        { address: delegationRecord, role: AccountRole.WRITABLE },
+        { address: delegationMetadata, role: AccountRole.WRITABLE },
+        { address: utils.DELEGATION_PROGRAM, role: AccountRole.READONLY },
+        ...(validator ? [{ address: validator, role: AccountRole.READONLY }] : []),
+      ],
+    };
+    await sendInstruction(this.rpc, delegatePermIx, this.signer);
+
+    // 4. Delegate ticket to TEE
+    await this.delegateTicket(player, tenant, validator);
+
+    // 5. Join the queue on TEE
     const teeClient = new MatchmakingPlayer(teeRpc, this.signer, this.programId);
     await teeClient.joinQueue(queue, tenant, playerData, callbackProgram);
 

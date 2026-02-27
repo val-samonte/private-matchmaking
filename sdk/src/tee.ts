@@ -45,46 +45,31 @@ export async function getAuthToken(
 }
 
 /**
- * Poll the TEE /permission endpoint until the given PDA shows delegation is active.
- *
- * IMPORTANT: `authorizedUsers` is only populated for PER-group delegation. For
- * DELeGG-based delegation (what this project uses), this function logs the full
- * response on timeout so we can identify the correct field. It does NOT throw on
- * timeout — the TEE operation itself is the real failure signal.
- *
- * The /permission endpoint is always called WITHOUT the auth token.
- * /permission?token=JWT&pubkey=PDA returns per-user access (always empty unless
- * explicitly granted via PER groups), not global delegation activation status.
+ * Poll the TEE until the Permission PDA for the given account is active (authorizedUsers non-empty).
+ * This confirms the TEE has picked up the delegated Permission PDA and is enforcing access control.
+ * Returns true if active before timeout, false otherwise.
  */
-export async function waitUntilPermissionActive(
+export async function waitForPermission(
   teeUrlWithToken: string,
-  pda: Address,
-  timeoutMs = 15000,
+  accountAddress: Address,
+  timeoutMs = 10000,
 ): Promise<boolean> {
-  // Always strip the token — /permission?pubkey=PDA is the correct global check
-  const [baseUrl] = teeUrlWithToken.replace("/?", "?").split("?");
-  const permissionUrl = `${baseUrl}/permission?pubkey=${pda}`;
+  const [baseUrl, token] = teeUrlWithToken.replace("/?", "?").split("?");
+  const permUrl = token
+    ? `${baseUrl}/permission?${token}&pubkey=${accountAddress}`
+    : `${baseUrl}/permission?pubkey=${accountAddress}`;
 
-  const start = Date.now();
-  let lastResponse: unknown = null;
-  while (Date.now() - start < timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     try {
-      const res = await fetch(permissionUrl);
-      if (res.ok) {
-        const json = (await res.json()) as Record<string, unknown>;
-        lastResponse = json;
-        const { authorizedUsers } = json as { authorizedUsers?: unknown[] };
-        if (authorizedUsers && authorizedUsers.length > 0) {
-          console.log(`[TEE] ${pda.slice(0, 16)}... delegation active`);
-          return true;
-        }
-      }
+      const res = await fetch(permUrl);
+      const json = (await res.json()) as { authorizedUsers?: unknown[] | null };
+      if (json.authorizedUsers && json.authorizedUsers.length > 0) return true;
     } catch {
-      // ignore transient errors, keep polling
+      // ignore transient errors
     }
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 500));
   }
-  // Warn with full response to diagnose which field to check for DELeGG delegation
-  console.warn(`[TEE] ${pda.slice(0, 16)}... not confirmed after ${timeoutMs}ms. /permission response: ${JSON.stringify(lastResponse)}`);
   return false;
 }
+

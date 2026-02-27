@@ -111,10 +111,6 @@ const match = await player.pollForMatch(ticketPda);
 
 Authenticate with the MagicBlock TEE. Returns `{ token, expiresAt }`. The token is passed as `?token=<jwt>` in the TEE RPC URL.
 
-### `waitUntilPermissionActive(teeUrlWithToken, pda)`
-
-Poll the TEE until a delegated PDA is active (authorized users list is non-empty).
-
 ## How the Callback Works
 
 When a match is found during `join_queue`, the duel program fires a CPI callback **signed by the Tenant PDA** via `invoke_signed`. This is cryptographically unforgeable — game programs can verify the signer is the Tenant PDA without any additional access control:

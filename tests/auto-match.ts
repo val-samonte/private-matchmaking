@@ -17,7 +17,8 @@ import * as crypto from "crypto";
 
 import { MatchmakingAdmin } from "../sdk/src/admin.js";
 import { MatchmakingPlayer } from "../sdk/src/player.js";
-import { getAuthToken, waitUntilPermissionActive } from "../sdk/src/tee.js";
+import { getAuthToken, waitForPermission } from "../sdk/src/tee.js";
+import { derivePermissionPda } from "../sdk/src/utils.js";
 import { sendInstruction } from "../sdk/src/transaction.js";
 
 import {
@@ -175,11 +176,18 @@ describe("web3-matchmaking-with-tickets", () => {
 
     await mmAdmin.delegateQueue(queueAuthority.address, ER_VALIDATOR);
 
-    console.log("Queue Initialized & Delegated (Dark Pool Active)");
+    console.log("Queue Initialized, Permission Set & Delegated (Dark Pool Active)");
 
-    console.log("Waiting for Queue TEE activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${tokenQ}`, queuePda);
-    console.log("Queue Active in TEE");
+    // Wait for TEE to pick up the Permission PDA — confirms ACL is enforced
+    const queuePermActive = await waitForPermission(
+      `${TEE_RPC_URL}?token=${tokenQ}`,
+      queuePda,
+      15000,
+    );
+    console.log(queuePermActive
+      ? "Queue permission active on TEE — only authority can read queue state"
+      : "Queue permission not yet active (TEE may still be syncing)"
+    );
   });
 
   it("Initialize Player Profiles & Delegate", async () => {
@@ -198,8 +206,7 @@ describe("web3-matchmaking-with-tickets", () => {
     });
     await sendInstruction(l1Rpc, delegateP1Ix, player1);
 
-    console.log("Waiting for P1 Profile TEE activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1}`, p1ProfilePda);
+
 
     // P2 profile
     const initP2Ix = await getInitializePlayerInstructionAsync({
@@ -216,8 +223,7 @@ describe("web3-matchmaking-with-tickets", () => {
     });
     await sendInstruction(l1Rpc, delegateP2Ix, player2);
 
-    console.log("Waiting for P2 Profile TEE activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token2}`, p2ProfilePda);
+
 
     console.log("Profiles Initialized & Delegated");
   });
@@ -232,6 +238,17 @@ describe("web3-matchmaking-with-tickets", () => {
       ER_VALIDATOR, RPS_GAME_PROGRAM_ID,
     );
     console.log("P1 Entered Matchmaking Queue:", p1TicketPda);
+
+    // Wait for TEE to pick up P1's ticket permission
+    const p1PermActive = await waitForPermission(
+      `${TEE_RPC_URL}?token=${token1}`,
+      p1TicketPda,
+      10000,
+    );
+    console.log(p1PermActive
+      ? "P1 ticket permission active on TEE"
+      : "P1 ticket permission not yet active (TEE still syncing)"
+    );
 
     // Wait for TEE to process the join
     await new Promise(r => setTimeout(r, 3000));
@@ -253,6 +270,44 @@ describe("web3-matchmaking-with-tickets", () => {
       // Account is locked by the delegation program — full privacy, also acceptable
       console.log("PRIVACY CONFIRMED: L1 could not fetch account (Delegated/Locked).");
     }
+  });
+
+  it("Unauthorized TEE wallet cannot read queue state (permission PDA enforced)", async () => {
+    // A wallet that has a valid TEE auth token but is NOT in the queue's permission set.
+    // TEE auth (challenge-sign) requires no on-chain funds — any keypair can authenticate.
+    const snooper = await generateKeyPairSigner();
+    const snooperAuth = await getAuthToken(TEE_RPC_URL, snooper);
+    const snooperRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${snooperAuth.token}`);
+
+    // Attempt to read the queue as the snooper
+    let sniffedEntries: number | null = null;
+    let accessDenied = false;
+    try {
+      const adminSnooper = new MatchmakingAdmin(snooperRpc, snooper, DUEL_PROGRAM_ID);
+      const queue = await adminSnooper.getQueue(queuePda);
+      sniffedEntries = queue.data.entries.length;
+    } catch {
+      // TEE rejected the read outright — account returned null, fetch threw
+      accessDenied = true;
+    }
+
+    if (accessDenied) {
+      console.log("Permission enforced: TEE denied queue read to unauthorized wallet (account not found)");
+    } else {
+      assert.equal(
+        sniffedEntries,
+        0,
+        `Privacy breach: unauthorized wallet read ${sniffedEntries} queue entries from TEE`,
+      );
+      console.log("Permission enforced: TEE returned masked data (0 entries) to unauthorized wallet");
+    }
+
+    // Sanity check: the authorized authority must still see the real entry
+    const teeRpcQ = createSolanaRpc(`${TEE_RPC_URL}?token=${tokenQ}`);
+    const adminAuth = new MatchmakingAdmin(teeRpcQ, queueAuthority, DUEL_PROGRAM_ID);
+    const queueAuth = await adminAuth.getQueue(queuePda);
+    assert.equal(queueAuth.data.entries.length, 1, "Queue authority must still see 1 entry after snooper attempt");
+    console.log("Confirmed: authority still sees 1 queue entry — permission PDA working correctly");
   });
 
   it("P2 Creates Ticket, Delegates, Joins Queue -> Auto-Match", async () => {
@@ -360,8 +415,7 @@ describe("web3-matchmaking-with-tickets", () => {
     });
     await sendInstruction(l1Rpc, delegateGameIx, player1);
 
-    console.log("Game Session Started & Delegated. Waiting for activation...");
-    await waitUntilPermissionActive(`${TEE_RPC_URL}?token=${token1}`, gameSessionPda);
+    console.log("Game Session Started & Delegated.");
 
     // P1 chooses Rock via TEE
     const teeRpc1 = createSolanaRpc(`${TEE_RPC_URL}?token=${token1}`);
@@ -415,6 +469,16 @@ describe("web3-matchmaking-with-tickets", () => {
 
     assert.ok(p1Profile.data.elo < 1000n, "P1 ELO should decrease");
     assert.ok(p2Profile.data.elo > 1000n, "P2 ELO should increase");
+
+    // Verify ELO and game result committed to L1 by persist_results
+    await new Promise(r => setTimeout(r, 5000));
+    const p1ProfileL1 = await fetchPlayerProfile(l1Rpc, p1ProfilePda);
+    const p2ProfileL1 = await fetchPlayerProfile(l1Rpc, p2ProfilePda);
+    assert.equal(p1ProfileL1.data.elo, p1Profile.data.elo, "P1 ELO committed to L1");
+    assert.equal(p2ProfileL1.data.elo, p2Profile.data.elo, "P2 ELO committed to L1");
+    const gameSessionL1 = await fetchGameSession(l1Rpc, gameSessionPda);
+    assert.equal(gameSessionL1.data.result.__kind, "Winner", "Game result committed to L1");
+    console.log(`ELO and game result confirmed on L1 — P1: ${p1ProfileL1.data.elo}, P2: ${p2ProfileL1.data.elo}`);
   });
 
   it("Third-party can read MatchTicket PDA on L1 to verify match", async () => {

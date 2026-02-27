@@ -102,6 +102,39 @@ pub mod duel {
         Ok(())
     }
 
+    /// Set up permission for queue PDA so only the authority can read it on TEE.
+    /// Must be called BEFORE delegate_queue while the program still owns the PDA.
+    pub fn setup_queue_permission(ctx: Context<SetupQueuePermission>) -> Result<()> {
+        let authority = ctx.accounts.authority.key();
+        let auth_bytes = authority.to_bytes();
+        let bump = ctx.accounts.queue.bump;
+
+        let permission_program_info = &ctx.accounts.permission_program;
+
+        CreatePermissionCpi::new(
+            permission_program_info,
+            CreatePermissionCpiAccounts {
+                permissioned_account: &ctx.accounts.queue.to_account_info(),
+                permission: &ctx.accounts.permission,
+                payer: &ctx.accounts.authority.to_account_info(),
+                system_program: &ctx.accounts.system_program.to_account_info(),
+            },
+            CreatePermissionInstructionArgs {
+                args: MembersArgs {
+                    members: Some(vec![
+                        Member { flags: AUTHORITY_FLAG, pubkey: authority },
+                    ]),
+                },
+            },
+        ).invoke_signed(&[&[
+            b"queue",
+            &auth_bytes,
+            &[bump],
+        ]])?;
+
+        Ok(())
+    }
+
     /// Set up permission for ticket PDA so queueAuthority can write it on TEE.
     /// Must be called BEFORE delegate_ticket while the program still owns the PDA.
     pub fn setup_ticket_permission(ctx: Context<SetupTicketPermission>) -> Result<()> {
@@ -530,6 +563,23 @@ pub struct CreateTicket<'info> {
     pub tenant: Account<'info, Tenant>,
     #[account(mut)]
     pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetupQueuePermission<'info> {
+    #[account(
+        seeds = [b"queue", authority.key().as_ref()],
+        bump = queue.bump,
+    )]
+    pub queue: Account<'info, Queue>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: Permission PDA derived from queue (seeds: [b"permission:", queue_key])
+    #[account(mut)]
+    pub permission: AccountInfo<'info>,
+    /// CHECK: Permission program (ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1)
+    pub permission_program: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
