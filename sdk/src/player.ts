@@ -47,8 +47,11 @@ export class MatchmakingPlayer {
 
   async createTicket(tenant: Address): Promise<string> {
     const ix = await getCreateTicketInstructionAsync({
-      player: this.signer,
+      player: this.signer.address, // Address: real player for PDA seeds
+      signer: this.signer,         // TransactionSigner: actual signing key
+      payer: this.signer,          // TransactionSigner: fee payer (same in SDK/test env)
       tenant,
+      // sessionToken omitted → resolve_player returns signer directly
     }, { programAddress: this.programId });
     return sendInstruction(this.rpc, ix, this.signer);
   }
@@ -78,7 +81,9 @@ export class MatchmakingPlayer {
       queue,
       tenant,
       playerData,
-      signer: this.signer,
+      player: this.signer.address, // Address: real player for ticket seeds
+      signer: this.signer,         // TransactionSigner: signing key
+      // sessionToken omitted → resolve_player returns signer directly
     }, { programAddress: this.programId });
     const ixFinal = callbackProgram
       ? { ...ix, accounts: [...ix.accounts, { address: callbackProgram, role: 0 as const }] }
@@ -89,16 +94,20 @@ export class MatchmakingPlayer {
 
   async cancelTicket(tenant: Address): Promise<string> {
     const ix = await getCancelTicketInstructionAsync({
-      player: this.signer,
+      player: this.signer.address, // Address: real player for PDA seeds
+      signer: this.signer,         // TransactionSigner: signing key
       tenant,
+      // sessionToken omitted → resolve_player returns signer directly
     }, { programAddress: this.programId });
     return sendInstruction(this.rpc, ix, this.signer);
   }
 
   async closeTicket(tenant: Address): Promise<string> {
     const ix = await getCloseTicketInstructionAsync({
-      player: this.signer,
+      player: this.signer.address, // Address: real player (receives rent)
+      signer: this.signer,         // TransactionSigner: signing key
       tenant,
+      // sessionToken omitted → resolve_player returns signer directly
     }, { programAddress: this.programId });
     return sendInstruction(this.rpc, ix, this.signer);
   }
@@ -156,14 +165,20 @@ export class MatchmakingPlayer {
     // TX A (1 wallet approval): createTicket + setupPermission
     // createTicket init-s the PDA; setupPermission CPIs into it — valid in one TX.
     const createIx = await getCreateTicketInstructionAsync({
-      player: this.signer,
+      player: this.signer.address, // Address: real player for PDA seeds
+      signer: this.signer,         // TransactionSigner: signing key
+      payer: this.signer,          // TransactionSigner: fee payer (same in SDK/test env)
       tenant,
+      // sessionToken omitted → resolve_player returns signer directly
     }, { programAddress: this.programId });
     const setupIx = await getSetupTicketPermissionInstructionAsync({
-      player: this.signer,
+      player: this.signer.address,
+      signer: this.signer,
+      payer: this.signer,
       tenant,
       permission: permissionPda,
       permissionProgram: utils.PERMISSION_PROGRAM,
+      sessionKey: null, // no session key in direct-wallet mode → only player + queue_authority in members
     }, { programAddress: this.programId });
     await sendInstructions(this.rpc, [createIx, setupIx], this.signer);
 
@@ -194,9 +209,10 @@ export class MatchmakingPlayer {
     }, { programAddress: this.programId });
     await sendInstructions(this.rpc, [delegatePermIx, delegateTicketIx as Instruction], this.signer);
 
-    // TX C (TEE, 1 approval): joinQueue
+    // TX C (TEE): joinQueue (player = self, signer = self)
     const teeClient = new MatchmakingPlayer(teeRpc, this.signer, this.programId);
     await teeClient.joinQueue(queue, tenant, playerData, callbackProgram);
+    // Note: joinQueue now uses player: this.signer.address and signer: this.signer internally
 
     return ticketPda;
   }

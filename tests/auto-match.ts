@@ -394,11 +394,16 @@ describe("web3-matchmaking-with-tickets", () => {
     });
 
     // Start game with ticket verification
+    // player1 acts as player (identity), signer (signs), AND payer (fees) in test env — no session key
     const startIx = await getStartGameWithTicketInstructionAsync({
-      player: player1,
+      player: player1.address,  // Address: real player for PDA seeds
+      signer: player1,          // TransactionSigner: actual signing key
+      payer: player1,           // TransactionSigner: fee payer (same in test env)
       matchTicket: p1TicketPda,
       gameId,
       opponent: player2.address,
+      sessionProgram: null,     // no session token in test env — direct wallet path
+      // sessionToken omitted → resolve_player returns signer directly
     });
     await sendInstruction(l1Rpc, startIx, player1);
 

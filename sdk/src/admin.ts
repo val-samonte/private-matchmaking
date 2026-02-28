@@ -29,6 +29,9 @@ export interface InitializeTenantOptions {
   eloDataType?: EloDataType;
   callbackProgramId?: Address | null;
   callbackDiscriminator?: number[] | null;
+  /** Session-keys program that may issue session tokens for this Tenant.
+   *  Defaults to null (session tokens rejected; direct wallet signing always works). */
+  sessionProgram?: Address | null;
 }
 
 function getEloSize(dataType: EloDataType): number {
@@ -83,6 +86,7 @@ export class MatchmakingAdmin {
       eloDataType = "u16",
       callbackProgramId = null,
       callbackDiscriminator = null,
+      sessionProgram = null,
     } = options || {};
 
     const eloSize = getEloSize(eloDataType);
@@ -96,6 +100,7 @@ export class MatchmakingAdmin {
       callbackDiscriminator: callbackDiscriminator
         ? { __option: "Some", value: new Uint8Array(callbackDiscriminator) }
         : { __option: "None" },
+      sessionProgram: sessionProgram ? { __option: "Some", value: sessionProgram } : { __option: "None" },
     }, { programAddress: this.programId });
 
     return sendInstruction(this.rpc, ix, this.signer);

@@ -215,4 +215,94 @@ export async function sendCreateSessionTx(
   }).send() as Promise<string>;
 }
 
+/**
+ * Send the create_session transaction for BOTH duel and rps-game programs in one TX.
+ * 3 instructions in 1 popup:
+ *   1. create_session for duel program
+ *   2. create_session for rps-game program
+ *   3. transfer SESSION_FUND_LAMPORTS to session key for TEE gas
+ *
+ * Returns { duelSessionTokenPda, rpsSessionTokenPda }.
+ */
+export async function sendCreateDualSessionTx(
+  rpc: Rpc<SolanaRpcApi>,
+  sessionKey: KeyPairSigner,
+  wallet: KitWallet,
+  duelProgramId: Address,
+  rpsProgramId: Address,
+  durationSeconds: number,
+): Promise<{ duelSessionTokenPda: Address; rpsSessionTokenPda: Address }> {
+  const validUntil = BigInt(Math.floor(Date.now() / 1000) + durationSeconds);
+  const authority = wallet.address as Address;
+
+  const duelSessionTokenPda = await deriveSessionTokenPda(
+    duelProgramId,
+    sessionKey.address,
+    authority,
+  );
+  const rpsSessionTokenPda = await deriveSessionTokenPda(
+    rpsProgramId,
+    sessionKey.address,
+    authority,
+  );
+
+  const duelIx = buildCreateSessionInstruction(
+    duelSessionTokenPda,
+    sessionKey.address,
+    authority,
+    duelProgramId,
+    validUntil,
+  );
+  const rpsIx = buildCreateSessionInstruction(
+    rpsSessionTokenPda,
+    sessionKey.address,
+    authority,
+    rpsProgramId,
+    validUntil,
+  );
+  const fundIx = buildSystemTransferInstruction(
+    authority,
+    sessionKey.address,
+    SESSION_FUND_LAMPORTS,
+  );
+
+  const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const msg: any = pipe(
+    createTransactionMessage({ version: 0 as const }),
+    (m) => setTransactionMessageFeePayer(authority, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
+    (m) => appendTransactionMessageInstruction(duelIx, m),
+    (m) => appendTransactionMessageInstruction(rpsIx, m),
+    (m) => appendTransactionMessageInstruction(fundIx, m),
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const unsignedTx = compileTransaction(msg as any);
+  const wireBase64 = getBase64EncodedWireTransaction(unsignedTx);
+  const wireBytes = Uint8Array.from(getBase64Encoder().encode(wireBase64));
+
+  // TX has 2 signers: [authority (fee payer, slot 0), session_signer (slot 1)]
+  // Wire layout: [0x02][64 wallet_sig][64 session_sig][message_bytes]
+  const messageBytes = wireBytes.slice(1 + 2 * 64);
+  const sessionSigBytes = new Uint8Array(
+    await crypto.subtle.sign("Ed25519", sessionKey.keyPair.privateKey, messageBytes),
+  );
+
+  const partiallySignedWire = new Uint8Array(wireBytes);
+  partiallySignedWire.set(sessionSigBytes, 1 + 64); // slot 1
+
+  const fullySignedWire = await wallet.signTransaction(partiallySignedWire);
+  const signedBase64 = btoa(String.fromCharCode(...fullySignedWire));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await rpc.sendTransaction(signedBase64 as any, {
+    encoding: "base64",
+    skipPreflight: true,
+  }).send();
+
+  return { duelSessionTokenPda, rpsSessionTokenPda };
+}
+
 export { generateKeyPairSigner };

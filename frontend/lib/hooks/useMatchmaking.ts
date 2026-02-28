@@ -4,10 +4,17 @@ import { useCallback, useState, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
-import { walletAtom, kitWalletAtom } from "@/lib/atoms/wallet";
+import { walletAtom } from "@/lib/atoms/wallet";
+import {
+  sessionSignerAtom,
+  sessionKitWalletAtom,
+  isSessionActiveAtom,
+  duelSessionTokenPdaAtom,
+} from "@/lib/atoms/session";
 import { createAuthenticatedTeeRpc } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
-import { sendInstruction, sendInstructions, withRemainingAccounts } from "@/lib/utils/transaction";
+import { sendInstruction, withRemainingAccounts } from "@/lib/utils/transaction";
+import { relayTx } from "@/lib/utils/relay";
 
 import { deriveQueuePda, deriveTenantPda, deriveTicketPda } from "@/lib/utils/pda";
 import {
@@ -15,30 +22,36 @@ import {
   RPS_GAME_PROGRAM_ID,
   QUEUE_AUTHORITY,
   TEE_RPC_URL,
-  TEE_WS_URL,
-  ER_VALIDATOR,
   DELEGATION_PROGRAM_ID,
+  SERVER_ADDRESS,
 } from "@/lib/constants";
 import {
   getCreateTicketInstructionAsync,
-  getDelegateTicketInstructionAsync,
   getSetupTicketPermissionInstructionAsync,
   getJoinQueueInstructionAsync,
   getFlushMatchesInstruction,
   getCommitTicketsInstruction,
   getCancelTicketInstructionAsync,
-  getCloseTicketInstructionAsync,
   fetchMaybeMatchTicket,
   fetchQueue,
 } from "@sdk/generated/duel";
-import { accountType } from "@sdk/generated/duel/types";
 import {
   PERMISSION_PROGRAM,
-  DELEGATION_PROGRAM as PERM_DELEGATION_PROGRAM,
   derivePermissionPda,
-  derivePermissionDelegationPdas,
 } from "@sdk/utils";
-import { AccountRole, type Address, type Instruction } from "@solana/kit";
+import { AccountRole, type Address, type Instruction, type TransactionPartialSigner } from "@solana/kit";
+
+/**
+ * Creates a no-op "dummy" signer for an address we don't own client-side.
+ * Used for the server fee-payer slot in relay transactions — the actual
+ * signing happens server-side; we only need the address for account key ordering.
+ */
+function serverDummySigner(address: Address): TransactionPartialSigner {
+  return {
+    address,
+    signTransactions: async (txs) => txs.map(() => ({} as Record<Address, import("@solana/kit").SignatureBytes>)),
+  };
+}
 
 type MatchmakingState =
   | "idle"
@@ -57,7 +70,10 @@ type MatchResult = {
 
 export function useMatchmaking() {
   const publicKey = useAtomValue(walletAtom);
-  const kitWallet = useAtomValue(kitWalletAtom);
+  const sessionSigner = useAtomValue(sessionSignerAtom);
+  const sessionKitWallet = useAtomValue(sessionKitWalletAtom);
+  const isSessionActive = useAtomValue(isSessionActiveAtom);
+  const duelSessionTokenPda = useAtomValue(duelSessionTokenPdaAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
   const rpc = useAtomValue(rpcAtom);
 
@@ -67,8 +83,11 @@ export function useMatchmaking() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const findMatch = useCallback(async () => {
-    if (!publicKey || !profilePda || !kitWallet) {
+    if (!publicKey || !profilePda) {
       throw new Error("Wallet not connected or profile not found");
+    }
+    if (!isSessionActive || !sessionSigner || !sessionKitWallet) {
+      throw new Error("Session key required. Please create a session first.");
     }
 
     abortControllerRef.current = new AbortController();
@@ -76,7 +95,6 @@ export function useMatchmaking() {
 
     try {
       setError(null);
-      const signer = walletToSigner(kitWallet);
 
       // Derive PDAs
       const [tenantPda] = await deriveTenantPda(QUEUE_AUTHORITY);
@@ -90,28 +108,36 @@ export function useMatchmaking() {
 
       if (existingTicket) {
         if (existingTicket.owner === DELEGATION_PROGRAM_ID) {
-          // Ticket is delegated to TEE — cancel on TEE then commit back
+          // Ticket is delegated to TEE — cancel on TEE using session key
           console.log("Stale ticket is delegated — cleaning up via TEE…");
-          const cleanupTeeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
+          const cleanupTeeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, sessionKitWallet);
 
           try {
-            const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
-            await sendInstruction(cleanupTeeRpc, cancelIx, kitWallet);
-          } catch (e: any) {
-            console.warn("cancelTicket on TEE failed:", e.message);
+            // Cancel: player=publicKey (Address), signer=session key, sessionToken=duelSessionTokenPda
+            const cancelIx = await getCancelTicketInstructionAsync({
+              player: publicKey,                          // Address: real player for PDA seeds
+              signer: walletToSigner(sessionKitWallet),  // session key signs
+              tenant: tenantPda,
+              sessionToken: duelSessionTokenPda ?? undefined,
+            });
+            await sendInstruction(cleanupTeeRpc, cancelIx, sessionKitWallet);
+          } catch (e: unknown) {
+            console.warn("cancelTicket on TEE failed:", (e as Error).message);
           }
 
-          // Commit tickets to return to L1 - passing ticket PDAs as remaining accounts
           try {
-            const commitIx = getCommitTicketsInstruction({ tenant: tenantPda, payer: signer });
+            const commitIx = getCommitTicketsInstruction({
+              tenant: tenantPda,
+              payer: walletToSigner(sessionKitWallet),
+            });
             await sendInstruction(cleanupTeeRpc, withRemainingAccounts(commitIx, [
               { address: ticketPda, role: AccountRole.WRITABLE },
-            ]) as any, kitWallet);
-          } catch (e: any) {
-            console.warn("commitTickets on TEE failed:", e.message);
+            ]) as unknown as Instruction, sessionKitWallet);
+          } catch (e: unknown) {
+            console.warn("commitTickets on TEE failed:", (e as Error).message);
           }
 
-          // Wait for L1 to see the undelegated ticket
+          // Wait for ticket to return to L1
           console.log("Waiting for ticket to return to L1…");
           for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 2000));
@@ -120,90 +146,91 @@ export function useMatchmaking() {
           }
         }
 
-        // Close the stale ticket if it's back on L1
+        // Close stale ticket on L1 if needed
         const ticketAfterCommit = await rpc.getAccountInfo(ticketPda, { encoding: "base64" }).send();
         if (ticketAfterCommit.value && ticketAfterCommit.value.owner !== DELEGATION_PROGRAM_ID) {
           console.log("Closing stale ticket on L1…");
           try {
-            const closeIx = await getCloseTicketInstructionAsync({ player: signer, tenant: tenantPda });
-            await sendInstruction(rpc, closeIx, kitWallet);
-          } catch (e: any) {
-            console.warn("closeTicket failed:", e.message);
+            // For close: still needs real player wallet as signer (owns the PDA for rent reclaim)
+            // TODO: once session auth on close_ticket lands, use session key here too
+            console.warn("close_ticket not available without wallet popup in session-key mode — skipping");
+          } catch (e: unknown) {
+            console.warn("closeTicket failed:", (e as Error).message);
           }
         }
       }
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // TX A (1 wallet approval): createTicket + setupPermission
-      // createTicket init-s the PDA; setupPermission CPIs into it — valid in one TX.
+      // 2. TX A via relay: createTicket + setupTicketPermission
+      //    Session key signs (slot 1), server pays (slot 0) via /api/relay
       setState("delegating");
-      console.log("Creating ticket + setting up permission (TX A)...");
+      console.log("Creating ticket + setting up permission via relay (TX A)…");
+
       const permissionPda = await derivePermissionPda(ticketPda);
-      const createIx = await getCreateTicketInstructionAsync({ player: signer, tenant: tenantPda });
+      const serverSigner = serverDummySigner(SERVER_ADDRESS);
+
+      const createIx = await getCreateTicketInstructionAsync({
+        player: publicKey,           // real player (UncheckedAccount → Address)
+        signer: sessionSigner,       // session key (TransactionSigner, signs slot 1)
+        payer: serverSigner,         // server dummy (address only, relay signs slot 0)
+        tenant: tenantPda,
+        sessionToken: duelSessionTokenPda ?? undefined,
+      }, { programAddress: DUEL_PROGRAM_ID });
+
       const setupPermIx = await getSetupTicketPermissionInstructionAsync({
-        player: signer,
+        player: publicKey,
+        signer: sessionSigner,
+        payer: serverSigner,
         tenant: tenantPda,
         permission: permissionPda,
         permissionProgram: PERMISSION_PROGRAM,
-      });
-      await sendInstructions(rpc, [createIx, setupPermIx], kitWallet);
-      console.log("Ticket created:", ticketPda);
+        sessionToken: duelSessionTokenPda ?? undefined,
+        sessionKey: sessionSigner.address,  // add session key to Permission members
+      }, { programAddress: DUEL_PROGRAM_ID });
+
+      await relayTx(rpc, [createIx as unknown as Instruction, setupPermIx as unknown as Instruction], sessionSigner, SERVER_ADDRESS);
+      console.log("Ticket created via relay:", ticketPda);
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // TX B (1 wallet approval): delegatePermission + delegateTicket
-      // Both are independent delegation calls; batching saves one round-trip.
-      console.log("Delegating permission + ticket (TX B)...");
-      const { delegationBuffer, delegationRecord, delegationMetadata } =
-        await derivePermissionDelegationPdas(permissionPda);
-      const delegatePermIx: Instruction = {
-        programAddress: PERMISSION_PROGRAM,
-        data: new Uint8Array([3, 0, 0, 0, 0, 0, 0, 0]),
-        accounts: [
-          { address: signer.address, role: AccountRole.WRITABLE_SIGNER },
-          { address: signer.address, role: AccountRole.READONLY_SIGNER },
-          { address: ticketPda, role: AccountRole.READONLY },
-          { address: permissionPda, role: AccountRole.WRITABLE },
-          { address: "11111111111111111111111111111111" as Address, role: AccountRole.READONLY },
-          { address: PERMISSION_PROGRAM, role: AccountRole.READONLY },
-          { address: delegationBuffer, role: AccountRole.WRITABLE },
-          { address: delegationRecord, role: AccountRole.WRITABLE },
-          { address: delegationMetadata, role: AccountRole.WRITABLE },
-          { address: PERM_DELEGATION_PROGRAM, role: AccountRole.READONLY },
-          { address: ER_VALIDATOR, role: AccountRole.READONLY },
-        ],
-      };
-      const delegateIx = await getDelegateTicketInstructionAsync({
-        pda: ticketPda,
-        payer: signer,
-        validator: ER_VALIDATOR,
-        accountType: accountType("Ticket", { player: publicKey, tenant: tenantPda }),
+      // 3. Server delegates Permission PDA + ticket
+      console.log("Delegating permission + ticket via server API…");
+      const delegateRes = await fetch("/api/delegate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerAddress: publicKey }),
       });
-      await sendInstructions(rpc, [delegatePermIx, delegateIx as any], kitWallet);
+      if (!delegateRes.ok) {
+        const err = await delegateRes.json() as { error?: string };
+        throw new Error(`Delegation failed: ${err.error || delegateRes.statusText}`);
+      }
+      console.log("Delegation complete");
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 5+6. Authenticate with TEE and join queue
+      // 4. Join queue via TEE (session key authenticates + signs)
       setState("joining");
-      console.log("Joining queue via TEE...");
-      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
+      console.log("Joining queue via TEE (session key)…");
+      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, sessionKitWallet);
 
       const joinIx = await getJoinQueueInstructionAsync({
         queue: queuePda,
         tenant: tenantPda,
         playerData: profilePda,
-        signer,
-      });
-      // Append callback program as remaining account so the Tenant PDA callback fires on match
+        player: publicKey,           // real player (UncheckedAccount)
+        signer: sessionSigner,       // session key signs
+        sessionToken: duelSessionTokenPda ?? undefined,
+      }, { programAddress: DUEL_PROGRAM_ID });
+
       await sendInstruction(teeRpc, withRemainingAccounts(joinIx, [
         { address: RPS_GAME_PROGRAM_ID, role: AccountRole.READONLY },
-      ]) as any, kitWallet);
+      ]) as unknown as Instruction, sessionKitWallet);
       console.log("Joined queue via TEE");
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 7. Flush pending matches + commit tickets (crank duty)
+      // 5. Flush pending matches + commit (crank duty, session key signs)
       try {
         const queueAccount = await fetchQueue(teeRpc, queuePda);
         const pendingMatches = queueAccount.data.pendingMatches;
@@ -217,33 +244,39 @@ export function useMatchmaking() {
             })
           );
 
-          console.log("Flushing pending matches...");
-          const flushIx = getFlushMatchesInstruction({ queue: queuePda, tenant: tenantPda, signer });
+          console.log("Flushing pending matches…");
+          const flushIx = getFlushMatchesInstruction({
+            queue: queuePda,
+            tenant: tenantPda,
+            signer: sessionSigner,
+          });
           await sendInstruction(teeRpc, withRemainingAccounts(flushIx,
             opponentTicketPdas.map((addr) => ({ address: addr, role: AccountRole.WRITABLE })),
-          ) as any, kitWallet);
+          ) as unknown as Instruction, sessionKitWallet);
           console.log("Pending matches flushed");
 
-          // Commit all matched tickets back to L1
           const allTickets = [ticketPda, ...opponentTicketPdas];
-          console.log("Committing tickets to L1...", allTickets);
-          const commitIx = getCommitTicketsInstruction({ tenant: tenantPda, payer: signer });
+          console.log("Committing tickets to L1…", allTickets);
+          const commitIx = getCommitTicketsInstruction({
+            tenant: tenantPda,
+            payer: sessionSigner,
+          });
           await sendInstruction(teeRpc, withRemainingAccounts(commitIx,
             allTickets.map((addr) => ({ address: addr, role: AccountRole.WRITABLE })),
-          ) as any, kitWallet);
+          ) as unknown as Instruction, sessionKitWallet);
           console.log("Tickets committed to L1");
         } else {
           console.log("No pending matches — waiting for opponent to join and flush");
         }
-      } catch (flushErr: any) {
-        console.warn("Flush/commit failed (other player may handle it):", flushErr.message);
+      } catch (flushErr: unknown) {
+        console.warn("Flush/commit failed (other player may handle it):", (flushErr as Error).message);
       }
 
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 8. Poll L1 for match (watching ticket PDA)
+      // 6. Poll L1 for match
       setState("searching");
-      console.log("Waiting for match (watching L1 ticket)...");
+      console.log("Waiting for match (watching L1 ticket)…");
 
       const match = await new Promise<MatchResult | null>((resolve) => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -256,10 +289,9 @@ export function useMatchmaking() {
 
         signal.addEventListener("abort", () => { cleanup(); resolve(null); });
 
-        // 2-minute timeout — cancel ticket on TEE so queue slot is freed
         timeoutId = setTimeout(() => {
           cleanup();
-          if (publicKey && kitWallet) cancelTicketFireAndForget(kitWallet, publicKey);
+          if (publicKey && sessionKitWallet) cancelTicketFireAndForget(sessionKitWallet, publicKey, tenantPda);
           resolve(null);
         }, 120000);
 
@@ -272,16 +304,14 @@ export function useMatchmaking() {
               cleanup();
               const opponentAddr = status.opponent;
               const matchId = status.matchId.toString();
-              // Determine role by comparing addresses lexicographically
               const role = publicKey < opponentAddr ? "player1" : "player2";
               resolve({ opponent: opponentAddr, matchId, role });
             }
           } catch {
-            // Ignore decode errors during transition
+            // ignore decode errors during transition
           }
         };
 
-        // Immediate check + poll every 3s
         checkTicket();
         pollId = setInterval(checkTicket, 3000);
       });
@@ -297,30 +327,27 @@ export function useMatchmaking() {
       } else {
         throw new Error("Match search timed out");
       }
-    } catch (err: any) {
-      if (err.message === "Search cancelled") {
+    } catch (err: unknown) {
+      if ((err as Error).message === "Search cancelled") {
         console.log("Match search cancelled by user");
         setState("idle");
         return null;
       }
       console.error("Matchmaking error:", err);
-      setError(err.message || "Failed to find match");
+      setError((err as Error).message || "Failed to find match");
       setState("error");
       throw err;
     }
-  }, [publicKey, profilePda, kitWallet, rpc]);
+  }, [publicKey, profilePda, sessionSigner, sessionKitWallet, isSessionActive, duelSessionTokenPda, rpc]);
 
   const cancelSearch = useCallback(() => {
     setState("idle");
     setMatchResult(null);
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      console.log("Cancelling match search...");
+      console.log("Cancelling match search…");
     }
-
-    // Best-effort on-chain cancel (fire-and-forget)
-    if (publicKey && kitWallet) cancelTicketFireAndForget(kitWallet, publicKey);
-  }, [publicKey, kitWallet]);
+  }, []);
 
   const reset = useCallback(() => {
     setState("idle");
@@ -339,16 +366,23 @@ export function useMatchmaking() {
 
 /**
  * Fire-and-forget: cancel a player's TEE ticket so the queue slot is freed.
- * Used by both the user-triggered cancelSearch and the 2-minute timeout.
  */
-function cancelTicketFireAndForget(kitWallet: import("@/lib/utils/wallet-bridge").KitWallet, publicKey: Address): void {
-  const signer = walletToSigner(kitWallet);
-  deriveTenantPda(QUEUE_AUTHORITY)
-    .then(async ([tenantPda]) => {
-      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
-      const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
-      await sendInstruction(teeRpc, cancelIx, kitWallet);
-      console.log("Ticket cancelled on-chain");
+function cancelTicketFireAndForget(
+  sessionKitWallet: import("@/lib/utils/wallet-bridge").KitWallet,
+  publicKey: Address,
+  tenantPda: Address,
+): void {
+  const signer = walletToSigner(sessionKitWallet);
+  createAuthenticatedTeeRpc(TEE_RPC_URL, sessionKitWallet)
+    .then(async (teeRpc) => {
+      const cancelIx = await getCancelTicketInstructionAsync({
+        player: publicKey,   // Address: real player for PDA seeds
+        signer,              // session key signs
+        tenant: tenantPda,
+        // sessionToken omitted in fire-and-forget path (best-effort, not critical)
+      });
+      await sendInstruction(teeRpc, cancelIx, sessionKitWallet);
+      console.log("Ticket cancelled on-chain for", publicKey);
     })
-    .catch((err) => console.warn("Failed to cancel ticket on-chain (best-effort):", err));
+    .catch((err: unknown) => console.warn("Failed to cancel ticket (best-effort):", (err as Error).message));
 }

@@ -5,9 +5,13 @@ import { generateKeyPairSigner } from "@solana/kit";
 import { useAtomValue, useSetAtom } from "jotai";
 import { rpcAtom } from "@/lib/atoms/program";
 import { kitWalletAtom } from "@/lib/atoms/wallet";
-import { sessionSignerAtom } from "@/lib/atoms/session";
-import { RPS_GAME_PROGRAM_ID } from "@/lib/constants";
-import { sendCreateSessionTx } from "@/lib/utils/session";
+import {
+  sessionSignerAtom,
+  duelSessionTokenPdaAtom,
+  rpsSessionTokenPdaAtom,
+} from "@/lib/atoms/session";
+import { DUEL_PROGRAM_ID, RPS_GAME_PROGRAM_ID } from "@/lib/constants";
+import { sendCreateDualSessionTx } from "@/lib/utils/session";
 
 /** How long a session token is valid (2 hours). */
 const SESSION_DURATION_SECONDS = 2 * 60 * 60;
@@ -23,19 +27,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const rpc = useAtomValue(rpcAtom);
   const kitWallet = useAtomValue(kitWalletAtom);
   const setSessionSigner = useSetAtom(sessionSignerAtom);
+  const setDuelSessionTokenPda = useSetAtom(duelSessionTokenPdaAtom);
+  const setRpsSessionTokenPda = useSetAtom(rpsSessionTokenPdaAtom);
 
   const createSession = useCallback(async () => {
     if (!kitWallet) throw new Error("Wallet not connected");
     const keypair = await generateKeyPairSigner();
-    await sendCreateSessionTx(rpc, keypair, kitWallet, RPS_GAME_PROGRAM_ID, SESSION_DURATION_SECONDS);
+
+    const { duelSessionTokenPda, rpsSessionTokenPda } =
+      await sendCreateDualSessionTx(
+        rpc,
+        keypair,
+        kitWallet,
+        DUEL_PROGRAM_ID,
+        RPS_GAME_PROGRAM_ID,
+        SESSION_DURATION_SECONDS,
+      );
+
     setSessionSigner(keypair);
-    console.log("Session key created:", keypair.address);
-  }, [rpc, kitWallet, setSessionSigner]);
+    setDuelSessionTokenPda(duelSessionTokenPda);
+    setRpsSessionTokenPda(rpsSessionTokenPda);
+    console.log("Dual session created:", keypair.address);
+    console.log("  duelSessionTokenPda:", duelSessionTokenPda);
+    console.log("  rpsSessionTokenPda:", rpsSessionTokenPda);
+  }, [rpc, kitWallet, setSessionSigner, setDuelSessionTokenPda, setRpsSessionTokenPda]);
 
   const clearSession = useCallback(() => {
     setSessionSigner(null);
+    setDuelSessionTokenPda(null);
+    setRpsSessionTokenPda(null);
     console.log("Session key cleared");
-  }, [setSessionSigner]);
+  }, [setSessionSigner, setDuelSessionTokenPda, setRpsSessionTokenPda]);
 
   return (
     <SessionContext.Provider value={{ createSession, clearSession }}>

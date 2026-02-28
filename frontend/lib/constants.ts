@@ -41,3 +41,12 @@ export const QUEUE_AUTHORITY: Address = address(
 
 // Delegation program
 export const DELEGATION_PROGRAM_ID: Address = address("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+
+// Gum Session Keys program — used for session token verification
+export const GUM_SESSION_PROGRAM: Address = address("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
+
+// Server address (= queue authority keypair) — pays relay & delegation fees
+// Must match SERVER_PRIVATE_KEY env var on the backend
+export const SERVER_ADDRESS: Address = address(
+  process.env.NEXT_PUBLIC_SERVER_ADDRESS || "Fh68kkXwFDubEdkRRBuWCXBdTr2YtnM52ASA7fxHrbCw"
+);

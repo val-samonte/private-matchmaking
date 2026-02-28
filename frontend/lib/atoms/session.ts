@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { KeyPairSigner } from "@solana/kit";
+import type { KeyPairSigner, Address } from "@solana/kit";
 import { sessionKeyToKitWallet } from "@/lib/utils/session";
 
 /**
@@ -21,3 +21,9 @@ export const sessionKitWalletAtom = atom((get) => {
  * Derived: true when a session key is active in memory
  */
 export const isSessionActiveAtom = atom((get) => get(sessionSignerAtom) !== null);
+
+/** Session token PDA for the duel program (created during createSession). */
+export const duelSessionTokenPdaAtom = atom<Address | null>(null);
+
+/** Session token PDA for the rps-game program (created during createSession). */
+export const rpsSessionTokenPdaAtom = atom<Address | null>(null);

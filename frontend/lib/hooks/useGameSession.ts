@@ -5,31 +5,43 @@ import { useAtomValue } from "jotai";
 import type { Address } from "@solana/kit";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
-import { walletAtom, kitWalletAtom } from "@/lib/atoms/wallet";
-import { sessionKitWalletAtom, isSessionActiveAtom } from "@/lib/atoms/session";
+import { walletAtom } from "@/lib/atoms/wallet";
+import {
+  sessionSignerAtom,
+  sessionKitWalletAtom,
+  isSessionActiveAtom,
+  rpsSessionTokenPdaAtom,
+} from "@/lib/atoms/session";
 import { createAuthenticatedTeeRpc, waitForDelegation } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction } from "@/lib/utils/transaction";
+import { relayTx } from "@/lib/utils/relay";
 import { derivePlayerProfilePda, deriveTicketPda, deriveTenantPda, deriveGameSessionPda } from "@/lib/utils/pda";
 import { deriveSessionTokenPda } from "@/lib/utils/session";
 import {
   RPS_GAME_PROGRAM_ID,
   TEE_RPC_URL,
-  TEE_WS_URL,
-  ER_VALIDATOR,
   QUEUE_AUTHORITY,
   DUEL_PROGRAM_ID,
+  SERVER_ADDRESS,
+  GUM_SESSION_PROGRAM,
 } from "@/lib/constants";
 import { Choice, type GameResult } from "@/lib/types/rps";
 import {
   getStartGameWithTicketInstructionAsync,
-  getDelegatePdaInstructionAsync,
   getMakeChoiceInstruction,
-  getPersistResultsInstruction,
   fetchMaybeGameSession,
 } from "@sdk/generated/rps-game";
 import { Choice as CodamaChoice } from "@sdk/generated/rps-game/types";
-import { createSolanaRpc } from "@solana/kit";
+import { createSolanaRpc, type TransactionPartialSigner } from "@solana/kit";
+
+/** No-op dummy signer for relay transactions where server signs server-side. */
+function serverDummySigner(address: Address): TransactionPartialSigner {
+  return {
+    address,
+    signTransactions: async (txs) => txs.map(() => ({} as Record<Address, import("@solana/kit").SignatureBytes>)),
+  };
+}
 
 export type GameSessionState =
   | "idle"
@@ -43,7 +55,6 @@ export type GameSessionState =
   | "complete"
   | "error";
 
-// Convert our UI Choice enum to Codama numeric enum
 function toCodamaChoice(choice: Choice): CodamaChoice {
   switch (choice) {
     case Choice.Rock: return CodamaChoice.Rock;
@@ -54,9 +65,10 @@ function toCodamaChoice(choice: Choice): CodamaChoice {
 
 export function useGameSession() {
   const publicKey = useAtomValue(walletAtom);
-  const kitWallet = useAtomValue(kitWalletAtom);
+  const sessionSigner = useAtomValue(sessionSignerAtom);
   const sessionKitWallet = useAtomValue(sessionKitWalletAtom);
   const isSessionActive = useAtomValue(isSessionActiveAtom);
+  const rpsSessionTokenPda = useAtomValue(rpsSessionTokenPdaAtom);
   const rpc = useAtomValue(rpcAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
 
@@ -74,8 +86,11 @@ export function useGameSession() {
     newGameId: number,
     role: "player1" | "player2"
   ) => {
-    if (!publicKey || !profilePda || !kitWallet) {
+    if (!publicKey || !profilePda) {
       throw new Error("Wallet not connected or profile not found");
+    }
+    if (!isSessionActive || !sessionSigner || !sessionKitWallet) {
+      throw new Error("Session key required. Please create a session first.");
     }
 
     try {
@@ -87,12 +102,7 @@ export function useGameSession() {
       setGameId(gameIdBig);
 
       console.log(`Starting game as ${role}...`);
-      console.log("Game ID:", newGameId);
-      console.log("Opponent:", opponentAddr);
 
-      const signer = walletToSigner(kitWallet);
-
-      // Derive game session PDA
       const p1 = role === "player1" ? publicKey : opponentAddr;
       const p2 = role === "player1" ? opponentAddr : publicKey;
       const [sessionPda] = await deriveGameSessionPda(p1, p2, gameIdBig, RPS_GAME_PROGRAM_ID);
@@ -100,55 +110,71 @@ export function useGameSession() {
       console.log("Game Session PDA:", sessionPda);
 
       if (role === "player1") {
-        // Derive MatchTicket PDA
         const [tenantPda] = await deriveTenantPda(QUEUE_AUTHORITY);
         const [ticketPda] = await deriveTicketPda(publicKey, tenantPda, DUEL_PROGRAM_ID);
 
-        console.log("P1: Calling start_game_with_ticket...");
+        console.log("P1: Calling start_game_with_ticket via relay…");
+        const serverSigner = serverDummySigner(SERVER_ADDRESS);
         const startIx = await getStartGameWithTicketInstructionAsync({
-          player: signer,
+          player: publicKey,         // real player (UncheckedAccount → Address)
+          signer: sessionSigner,     // session key (TransactionSigner, slot 1)
+          payer: serverSigner,       // server dummy (address only, relay signs slot 0)
           matchTicket: ticketPda,
           gameId: gameIdBig,
           opponent: opponentAddr,
-        });
-        await sendInstruction(rpc, startIx, kitWallet);
+          sessionToken: rpsSessionTokenPda ?? undefined,
+          sessionProgram: GUM_SESSION_PROGRAM,  // program that issued the session token
+        }, { programAddress: RPS_GAME_PROGRAM_ID });
+
+        await relayTx(
+          rpc,
+          [startIx as unknown as import("@solana/kit").Instruction],
+          sessionSigner,
+          SERVER_ADDRESS,
+        );
         console.log("P1: Game started on L1");
 
-        // Delegate game session to TEE
+        // Server delegates game session
         setGameState("delegating");
-        console.log("P1: Delegating game session...");
-        const delegateIx = await getDelegatePdaInstructionAsync({
-          pda: sessionPda,
-          payer: signer,
-          validator: ER_VALIDATOR,
-          accountType: { __kind: "GameSession", fields: [{ p1: publicKey, p2: opponentAddr, id: gameIdBig }] } as any,
+        console.log("P1: Delegating game session via server API…");
+        const delegateGameRes = await fetch("/api/delegate-game", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            player1: p1,
+            player2: p2,
+            gameId: gameIdBig.toString(),
+          }),
         });
-        await sendInstruction(rpc, delegateIx, kitWallet);
+        if (!delegateGameRes.ok) {
+          const err = await delegateGameRes.json() as { error?: string };
+          throw new Error(`Game delegation failed: ${err.error || delegateGameRes.statusText}`);
+        }
+        console.log("P1: Game session delegated");
       } else {
-        // PLAYER 2: Wait for P1 to create and delegate game
-        console.log("P2: Waiting for P1 to create and delegate game...");
+        console.log("P2: Waiting for P1 to create and delegate game…");
         setGameState("delegating");
       }
 
-      // Both players wait for TEE delegation to activate
-      console.log("Waiting for game session delegation...");
-      await waitForDelegation(TEE_RPC_URL, kitWallet, sessionPda);
-      console.log("Game session delegated and active!");
+      // Both players wait for TEE delegation to activate (session key polls)
+      console.log("Waiting for game session delegation…");
+      await waitForDelegation(TEE_RPC_URL, sessionKitWallet, sessionPda);
+      console.log("Game session active on TEE!");
 
       setGameState("ready");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Start game error:", err);
-      const msg = err.message?.startsWith("Delegation timeout")
+      const msg = (err as Error).message?.startsWith("Delegation timeout")
         ? "Game setup timed out — opponent may not have confirmed. Please go back and try again."
-        : err.message || "Failed to start game";
+        : (err as Error).message || "Failed to start game";
       setError(msg);
       setGameState("error");
       throw err;
     }
-  }, [publicKey, rpc, profilePda, kitWallet]);
+  }, [publicKey, rpc, profilePda, sessionSigner, sessionKitWallet, isSessionActive, rpsSessionTokenPda]);
 
   const makeChoice = useCallback(async (choice: Choice) => {
-    if (!publicKey || !gameSessionPda || !profilePda || !opponent || !kitWallet) {
+    if (!publicKey || !gameSessionPda || !profilePda || !opponent || !sessionKitWallet) {
       throw new Error("Game not started");
     }
 
@@ -159,15 +185,16 @@ export function useGameSession() {
 
       console.log("Making choice:", choice);
 
-      // TEE auth always uses the real wallet (session key doesn't change TEE identity)
-      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
+      // TEE auth uses session key
+      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, sessionKitWallet);
 
-      // Use session key for signing when available — no wallet popup required
-      const moveWallet = (isSessionActive && sessionKitWallet) ? sessionKitWallet : kitWallet;
+      // Use session key for signing when available
+      const moveWallet = (isSessionActive && sessionKitWallet) ? sessionKitWallet : null;
+      if (!moveWallet) throw new Error("Session key required for make_choice");
       const signer = walletToSigner(moveWallet);
 
-      // When using session key: include its session token PDA so the program can verify
-      const sessionTokenPda = (isSessionActive && sessionKitWallet && publicKey)
+      // Include session token so the program can verify
+      const sessionTokenPda = (sessionKitWallet && publicKey)
         ? await deriveSessionTokenPda(RPS_GAME_PROGRAM_ID, sessionKitWallet.address, publicKey as Address)
         : undefined;
 
@@ -184,28 +211,27 @@ export function useGameSession() {
         choice: toCodamaChoice(choice),
       });
 
-      console.log(isSessionActive ? "Submitting choice via session key (no popup)..." : "Submitting choice to TEE...");
+      console.log("Submitting choice via session key (no popup)…");
       await sendInstruction(teeRpc, choiceIx, moveWallet);
       console.log("Choice submitted");
 
-      // Poll for game completion
       setGameState("resolving");
-      console.log("Waiting for opponent's choice...");
+      console.log("Waiting for opponent's choice…");
       const { result: gameResult, p1Choice, p2Choice } = await pollForGameResult(teeRpc, gameSessionPda);
       setResult(gameResult);
       setOpponentChoice(isPlayer1 ? p2Choice : p1Choice);
 
       setGameState("complete");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Make choice error:", err);
-      setError(err.message || "Failed to make choice");
+      setError((err as Error).message || "Failed to make choice");
       setGameState("error");
       throw err;
     }
-  }, [publicKey, gameSessionPda, profilePda, opponent, gameId, kitWallet, isSessionActive, sessionKitWallet]);
+  }, [publicKey, gameSessionPda, profilePda, opponent, gameId, sessionKitWallet, isSessionActive]);
 
   const persistResults = useCallback(async () => {
-    if (!publicKey || !gameSessionPda || !profilePda || !opponent || !kitWallet) {
+    if (!publicKey || !gameSessionPda || !opponent || !gameId) {
       throw new Error("Game not complete");
     }
 
@@ -213,32 +239,36 @@ export function useGameSession() {
       setGameState("persisting");
       setError(null);
 
-      console.log("Persisting results to L1...");
+      console.log("Persisting results via server API…");
 
-      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
-      const signer = walletToSigner(kitWallet);
+      // Determine player1/player2 ordering (same as startGame)
+      const [derivedPda] = await deriveGameSessionPda(publicKey, opponent, gameId, RPS_GAME_PROGRAM_ID);
+      const p1 = derivedPda === gameSessionPda ? publicKey : opponent;
+      const p2 = derivedPda === gameSessionPda ? opponent : publicKey;
 
-      const { player1ProfilePda, player2ProfilePda } = await resolveProfilePdas(
-        publicKey, opponent, gameId!, gameSessionPda, profilePda,
-      );
-
-      const persistIx = getPersistResultsInstruction({
-        gameSession: gameSessionPda,
-        player1Profile: player1ProfilePda,
-        player2Profile: player2ProfilePda,
-        payer: signer,
+      const res = await fetch("/api/persist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          player1: p1,
+          player2: p2,
+          gameId: gameId.toString(),
+        }),
       });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        throw new Error(`Persist failed: ${err.error || res.statusText}`);
+      }
 
-      await sendInstruction(teeRpc, persistIx, kitWallet);
       console.log("Results persisted");
       setGameState("complete");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Persist results error:", err);
-      setError(err.message || "Failed to persist results");
+      setError((err as Error).message || "Failed to persist results");
       setGameState("error");
       throw err;
     }
-  }, [publicKey, gameSessionPda, profilePda, opponent, gameId, kitWallet]);
+  }, [publicKey, gameSessionPda, opponent, gameId]);
 
   const reset = useCallback(() => {
     setGameState("idle");
@@ -267,7 +297,6 @@ export function useGameSession() {
   };
 }
 
-/** Resolves player1/player2 profile PDAs and whether the local player is player1. */
 async function resolveProfilePdas(
   publicKey: Address,
   opponent: Address,
@@ -325,7 +354,7 @@ async function pollForGameResult(
         return { result: gameResult, p1Choice: p1, p2Choice: p2 };
       }
 
-      console.log(`Polling attempt ${i + 1}/${maxAttempts} - waiting for opponent...`);
+      console.log(`Polling ${i + 1}/${maxAttempts} - waiting for opponent…`);
     } catch (err) {
       console.error("Poll error:", err);
     }
