@@ -279,8 +279,23 @@ export function useMatchmaking() {
 
         signal.addEventListener("abort", () => { cleanup(); resolve(null); });
 
-        // 2-minute timeout
-        timeoutId = setTimeout(() => { cleanup(); resolve(null); }, 120000);
+        // 2-minute timeout — cancel ticket on TEE so queue slot is freed
+        timeoutId = setTimeout(() => {
+          cleanup();
+          if (publicKey && kitWallet) {
+            const signer = walletToSigner(kitWallet);
+            deriveTenantPda(QUEUE_AUTHORITY)
+              .then(async ([tenantPda]) => {
+                const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
+                const cleanupRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
+                const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
+                await sendInstruction(cleanupRpc, cancelIx, kitWallet);
+                console.log("Ticket cancelled after timeout");
+              })
+              .catch((err) => console.warn("Timeout ticket cancel failed (best-effort):", err));
+          }
+          resolve(null);
+        }, 120000);
 
         const checkTicket = async () => {
           try {

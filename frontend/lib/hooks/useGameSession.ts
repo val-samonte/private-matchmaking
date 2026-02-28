@@ -63,6 +63,7 @@ export function useGameSession() {
   const [opponent, setOpponent] = useState<Address | null>(null);
   const [gameId, setGameId] = useState<bigint | null>(null);
   const [playerChoice, setPlayerChoice] = useState<Choice | null>(null);
+  const [opponentChoice, setOpponentChoice] = useState<Choice | null>(null);
   const [result, setResult] = useState<GameResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,7 +137,10 @@ export function useGameSession() {
       setGameState("ready");
     } catch (err: any) {
       console.error("Start game error:", err);
-      setError(err.message || "Failed to start game");
+      const msg = err.message?.startsWith("Delegation timeout")
+        ? "Game setup timed out — opponent may not have confirmed. Please go back and try again."
+        : err.message || "Failed to start game";
+      setError(msg);
       setGameState("error");
       throw err;
     }
@@ -191,7 +195,9 @@ export function useGameSession() {
       // Poll for game completion
       setGameState("resolving");
       console.log("Waiting for opponent's choice...");
-      await pollForGameResult(teeRpc, gameSessionPda, setResult);
+      const { result: gameResult, p1Choice, p2Choice } = await pollForGameResult(teeRpc, gameSessionPda);
+      setResult(gameResult);
+      setOpponentChoice(isPlayer1 ? p2Choice : p1Choice);
 
       setGameState("complete");
     } catch (err: any) {
@@ -244,6 +250,7 @@ export function useGameSession() {
     setOpponent(null);
     setGameId(null);
     setPlayerChoice(null);
+    setOpponentChoice(null);
     setResult(null);
     setError(null);
   }, []);
@@ -254,6 +261,7 @@ export function useGameSession() {
     opponent,
     gameId,
     playerChoice,
+    opponentChoice,
     result,
     error,
     startGame,
@@ -263,13 +271,21 @@ export function useGameSession() {
   };
 }
 
+function codamaChoiceToChoice(c: { __kind: string }): Choice {
+  switch (c.__kind) {
+    case "Rock": return Choice.Rock;
+    case "Paper": return Choice.Paper;
+    case "Scissors": return Choice.Scissors;
+    default: throw new Error(`Unknown choice: ${c.__kind}`);
+  }
+}
+
 async function pollForGameResult(
   rpc: ReturnType<typeof createSolanaRpc>,
   sessionPda: Address,
-  setResult: (result: GameResult) => void,
   maxAttempts = 30,
   pollInterval = 2000,
-): Promise<void> {
+): Promise<{ result: GameResult; p1Choice: Choice; p2Choice: Choice }> {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, pollInterval));
 
@@ -280,15 +296,19 @@ async function pollForGameResult(
       const { player1Choice, player2Choice, result } = maybeAccount.data;
       if (player1Choice.__option === "Some" && player2Choice.__option === "Some") {
         console.log("Both players have chosen - game resolved");
-        // Convert Codama GameResult to our GameResult
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p1 = codamaChoiceToChoice((player1Choice as any).value);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p2 = codamaChoiceToChoice((player2Choice as any).value);
+        let gameResult: GameResult;
         if (result.__kind === "Winner") {
-          setResult({ winner: result.fields[0] });
+          gameResult = { winner: result.fields[0] };
         } else if (result.__kind === "Tie") {
-          setResult({ tie: {} });
+          gameResult = { tie: {} };
         } else {
-          setResult({ none: {} });
+          gameResult = { none: {} };
         }
-        return;
+        return { result: gameResult, p1Choice: p1, p2Choice: p2 };
       }
 
       console.log(`Polling attempt ${i + 1}/${maxAttempts} - waiting for opponent...`);

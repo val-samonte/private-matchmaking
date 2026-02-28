@@ -16,6 +16,7 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
   const {
     gameState,
     playerChoice,
+    opponentChoice,
     result,
     error,
     startGame,
@@ -120,29 +121,28 @@ export function GameBoard({ opponent, gameId, role, onGameComplete }: GameBoardP
     if (gameState === "complete" && result) {
       const winner = getWinner(result);
       const tie = isTie(result);
+      const youWon = winner !== null && winner !== opponent;
 
       return (
         <div className="text-center space-y-6">
           <div className="text-6xl mb-4">
-            {tie ? "🤝" : winner ? "🎉" : "❓"}
+            {tie ? "🤝" : youWon ? "🎉" : "😔"}
           </div>
 
-          <div className="space-y-2">
-            {tie ? (
-              <p className="text-3xl font-bold text-warning">It&apos;s a Tie!</p>
-            ) : winner ? (
-              <p className="text-3xl font-bold text-success">
-                {winner === opponent ? "You Lost!" : "You Won!"}
-              </p>
-            ) : (
-              <p className="text-3xl font-bold">Game Complete</p>
-            )}
-          </div>
+          <p className={`text-3xl font-bold ${tie ? "text-warning" : youWon ? "text-success" : "text-error"}`}>
+            {tie ? "It&apos;s a Tie!" : youWon ? "You Won!" : "You Lost!"}
+          </p>
 
-          <div className="glass rounded-xl p-6 space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-foreground-muted">Your Choice:</span>
-              <span className="text-2xl">{playerChoice && getChoiceEmoji(playerChoice)}</span>
+          <div className="glass rounded-xl p-6 grid grid-cols-2 gap-6">
+            <div className="text-center space-y-2">
+              <div className="text-sm text-foreground-muted">You</div>
+              <div className="text-5xl">{playerChoice && getChoiceEmoji(playerChoice)}</div>
+              <div className="capitalize text-sm font-medium">{playerChoice}</div>
+            </div>
+            <div className="text-center space-y-2">
+              <div className="text-sm text-foreground-muted">Opponent</div>
+              <div className="text-5xl">{opponentChoice ? getChoiceEmoji(opponentChoice) : "❓"}</div>
+              <div className="capitalize text-sm font-medium">{opponentChoice ?? "—"}</div>
             </div>
           </div>
 
