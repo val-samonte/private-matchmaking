@@ -5,9 +5,9 @@ import { useAtomValue } from "jotai";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
 import { useWalletContext } from "@/lib/contexts/WalletContext";
-import { getTeeAuthToken } from "@/lib/utils/tee";
+import { createAuthenticatedTeeRpc } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
-import { sendInstruction, sendInstructions } from "@/lib/utils/transaction";
+import { sendInstruction, sendInstructions, withRemainingAccounts } from "@/lib/utils/transaction";
 
 import { deriveQueuePda, deriveTenantPda, deriveTicketPda } from "@/lib/utils/pda";
 import {
@@ -38,7 +38,7 @@ import {
   derivePermissionPda,
   derivePermissionDelegationPdas,
 } from "@sdk/utils";
-import { createSolanaRpc, AccountRole, type Address, type Instruction } from "@solana/kit";
+import { AccountRole, type Address, type Instruction } from "@solana/kit";
 
 type MatchmakingState =
   | "idle"
@@ -91,8 +91,7 @@ export function useMatchmaking() {
         if (existingTicket.owner === DELEGATION_PROGRAM_ID) {
           // Ticket is delegated to TEE — cancel on TEE then commit back
           console.log("Stale ticket is delegated — cleaning up via TEE…");
-          const { token: cleanupToken } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
-          const cleanupTeeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${cleanupToken}`);
+          const cleanupTeeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
 
           try {
             const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
@@ -104,15 +103,9 @@ export function useMatchmaking() {
           // Commit tickets to return to L1 - passing ticket PDAs as remaining accounts
           try {
             const commitIx = getCommitTicketsInstruction({ tenant: tenantPda, payer: signer });
-            // Add ticket as remaining account (writable)
-            const commitIxWithRemaining = {
-              ...commitIx,
-              accounts: [
-                ...commitIx.accounts,
-                { address: ticketPda, role: 1 /* AccountRole.WRITABLE */ },
-              ],
-            };
-            await sendInstruction(cleanupTeeRpc, commitIxWithRemaining as any, kitWallet);
+            await sendInstruction(cleanupTeeRpc, withRemainingAccounts(commitIx, [
+              { address: ticketPda, role: AccountRole.WRITABLE },
+            ]) as any, kitWallet);
           } catch (e: any) {
             console.warn("commitTickets on TEE failed:", e.message);
           }
@@ -188,16 +181,12 @@ export function useMatchmaking() {
       });
       await sendInstructions(rpc, [delegatePermIx, delegateIx as any], kitWallet);
 
-      // 5. Get TEE auth token
-      console.log("Authenticating with TEE...");
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
-
       if (signal.aborted) throw new Error("Search cancelled");
 
-      // 6. Join queue via TEE
+      // 5+6. Authenticate with TEE and join queue
       setState("joining");
       console.log("Joining queue via TEE...");
-      const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
+      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
 
       const joinIx = await getJoinQueueInstructionAsync({
         queue: queuePda,
@@ -206,11 +195,9 @@ export function useMatchmaking() {
         signer,
       });
       // Append callback program as remaining account so the Tenant PDA callback fires on match
-      const joinIxWithCallback = {
-        ...joinIx,
-        accounts: [...joinIx.accounts, { address: RPS_GAME_PROGRAM_ID, role: 0 as const }],
-      };
-      await sendInstruction(teeRpc, joinIxWithCallback as any, kitWallet);
+      await sendInstruction(teeRpc, withRemainingAccounts(joinIx, [
+        { address: RPS_GAME_PROGRAM_ID, role: AccountRole.READONLY },
+      ]) as any, kitWallet);
       console.log("Joined queue via TEE");
 
       if (signal.aborted) throw new Error("Search cancelled");
@@ -231,29 +218,18 @@ export function useMatchmaking() {
 
           console.log("Flushing pending matches...");
           const flushIx = getFlushMatchesInstruction({ queue: queuePda, tenant: tenantPda, signer });
-          // Add opponent tickets as remaining accounts (writable)
-          const flushIxWithRemaining = {
-            ...flushIx,
-            accounts: [
-              ...flushIx.accounts,
-              ...opponentTicketPdas.map((addr) => ({ address: addr, role: 1 /* AccountRole.WRITABLE */ })),
-            ],
-          };
-          await sendInstruction(teeRpc, flushIxWithRemaining as any, kitWallet);
+          await sendInstruction(teeRpc, withRemainingAccounts(flushIx,
+            opponentTicketPdas.map((addr) => ({ address: addr, role: AccountRole.WRITABLE })),
+          ) as any, kitWallet);
           console.log("Pending matches flushed");
 
           // Commit all matched tickets back to L1
           const allTickets = [ticketPda, ...opponentTicketPdas];
           console.log("Committing tickets to L1...", allTickets);
           const commitIx = getCommitTicketsInstruction({ tenant: tenantPda, payer: signer });
-          const commitIxWithRemaining = {
-            ...commitIx,
-            accounts: [
-              ...commitIx.accounts,
-              ...allTickets.map((addr) => ({ address: addr, role: 1 /* AccountRole.WRITABLE */ })),
-            ],
-          };
-          await sendInstruction(teeRpc, commitIxWithRemaining as any, kitWallet);
+          await sendInstruction(teeRpc, withRemainingAccounts(commitIx,
+            allTickets.map((addr) => ({ address: addr, role: AccountRole.WRITABLE })),
+          ) as any, kitWallet);
           console.log("Tickets committed to L1");
         } else {
           console.log("No pending matches — waiting for opponent to join and flush");
@@ -282,18 +258,7 @@ export function useMatchmaking() {
         // 2-minute timeout — cancel ticket on TEE so queue slot is freed
         timeoutId = setTimeout(() => {
           cleanup();
-          if (publicKey && kitWallet) {
-            const signer = walletToSigner(kitWallet);
-            deriveTenantPda(QUEUE_AUTHORITY)
-              .then(async ([tenantPda]) => {
-                const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
-                const cleanupRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
-                const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
-                await sendInstruction(cleanupRpc, cancelIx, kitWallet);
-                console.log("Ticket cancelled after timeout");
-              })
-              .catch((err) => console.warn("Timeout ticket cancel failed (best-effort):", err));
-          }
+          if (publicKey && kitWallet) cancelTicketFireAndForget(kitWallet, publicKey);
           resolve(null);
         }, 120000);
 
@@ -353,18 +318,7 @@ export function useMatchmaking() {
     }
 
     // Best-effort on-chain cancel (fire-and-forget)
-    if (publicKey && kitWallet) {
-      const signer = walletToSigner(kitWallet);
-      deriveTenantPda(QUEUE_AUTHORITY)
-        .then(async ([tenantPda]) => {
-          const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
-          const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
-          const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
-          return sendInstruction(teeRpc, cancelIx, kitWallet);
-        })
-        .then(() => console.log("Ticket cancelled on-chain"))
-        .catch((err) => console.warn("Failed to cancel ticket on-chain (best-effort):", err));
-    }
+    if (publicKey && kitWallet) cancelTicketFireAndForget(kitWallet, publicKey);
   }, [publicKey, kitWallet]);
 
   const reset = useCallback(() => {
@@ -380,4 +334,20 @@ export function useMatchmaking() {
     error,
     reset,
   };
+}
+
+/**
+ * Fire-and-forget: cancel a player's TEE ticket so the queue slot is freed.
+ * Used by both the user-triggered cancelSearch and the 2-minute timeout.
+ */
+function cancelTicketFireAndForget(kitWallet: import("@/lib/utils/wallet-bridge").KitWallet, publicKey: Address): void {
+  const signer = walletToSigner(kitWallet);
+  deriveTenantPda(QUEUE_AUTHORITY)
+    .then(async ([tenantPda]) => {
+      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
+      const cancelIx = await getCancelTicketInstructionAsync({ player: signer, tenant: tenantPda });
+      await sendInstruction(teeRpc, cancelIx, kitWallet);
+      console.log("Ticket cancelled on-chain");
+    })
+    .catch((err) => console.warn("Failed to cancel ticket on-chain (best-effort):", err));
 }

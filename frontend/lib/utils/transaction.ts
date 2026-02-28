@@ -7,6 +7,7 @@ import {
   getBase64EncodedWireTransaction,
   getBase64Encoder,
   pipe,
+  type Address,
   type Instruction,
   type SolanaRpcApi,
   type Rpc,
@@ -14,6 +15,17 @@ import {
 import type { KitWallet } from "./wallet-bridge";
 
 type SolanaRpc = Rpc<SolanaRpcApi>;
+
+/**
+ * Append extra accounts to an instruction (e.g. remaining_accounts / callback programs).
+ * Keeps existing accounts at the front; extra accounts are appended in order.
+ */
+export function withRemainingAccounts(
+  ix: Instruction,
+  extra: Array<{ address: Address; role: number }>,
+): Instruction {
+  return { ...ix, accounts: [...(ix.accounts ?? []), ...extra] } as Instruction;
+}
 
 /**
  * Build, sign, and send a single instruction as a v0 transaction.

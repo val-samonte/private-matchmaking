@@ -1,4 +1,4 @@
-import { getBase58Decoder, type Address } from "@solana/kit";
+import { getBase58Decoder, createSolanaRpc, type Address } from "@solana/kit";
 import type { KitWallet } from "./wallet-bridge";
 
 const DELEGATION_PROGRAM = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
@@ -44,15 +44,26 @@ export async function getTeeAuthToken(
 }
 
 /**
+ * Get a TEE-authenticated Solana RPC client in one call.
+ * Combines getTeeAuthToken + createSolanaRpc — use this instead of calling both inline.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createAuthenticatedTeeRpc(rpcUrl: string, wallet: KitWallet): Promise<any> {
+  const { token } = await getTeeAuthToken(rpcUrl, wallet);
+  return createSolanaRpc(`${rpcUrl}?token=${token}`);
+}
+
+/**
  * Wait for account delegation to activate on TEE.
  * Polls the TEE RPC until the account owner is the delegation program.
  */
 export async function waitForDelegation(
   teeRpcUrl: string,
-  token: string,
+  wallet: KitWallet,
   pda: Address,
   timeoutMs = 30000,
 ): Promise<void> {
+  const { token } = await getTeeAuthToken(teeRpcUrl, wallet);
   const url = `${teeRpcUrl}?token=${token}`;
   const start = Date.now();
 

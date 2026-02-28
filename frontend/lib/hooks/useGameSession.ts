@@ -6,7 +6,7 @@ import type { Address } from "@solana/kit";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
 import { useWalletContext } from "@/lib/contexts/WalletContext";
-import { getTeeAuthToken, waitForDelegation } from "@/lib/utils/tee";
+import { createAuthenticatedTeeRpc, waitForDelegation } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction } from "@/lib/utils/transaction";
 import { derivePlayerProfilePda, deriveTicketPda, deriveTenantPda, deriveGameSessionPda } from "@/lib/utils/pda";
@@ -129,9 +129,8 @@ export function useGameSession() {
       }
 
       // Both players wait for TEE delegation to activate
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
       console.log("Waiting for game session delegation...");
-      await waitForDelegation(TEE_RPC_URL, token, sessionPda);
+      await waitForDelegation(TEE_RPC_URL, kitWallet, sessionPda);
       console.log("Game session delegated and active!");
 
       setGameState("ready");
@@ -159,8 +158,7 @@ export function useGameSession() {
       console.log("Making choice:", choice);
 
       // TEE auth always uses the real wallet (session key doesn't change TEE identity)
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
-      const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
+      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
 
       // Use session key for signing when available — no wallet popup required
       const moveWallet = (isSessionActive && sessionKitWallet) ? sessionKitWallet : kitWallet;
@@ -171,13 +169,9 @@ export function useGameSession() {
         ? await deriveSessionTokenPda(RPS_GAME_PROGRAM_ID, sessionKitWallet.address, publicKey as Address)
         : undefined;
 
-      // Derive opponent profile PDA
-      const [opponentProfilePda] = await derivePlayerProfilePda(opponent, RPS_GAME_PROGRAM_ID);
-
-      // Determine player1/player2 profile order
-      const isPlayer1 = (await deriveGameSessionPda(publicKey, opponent, gameId!, RPS_GAME_PROGRAM_ID))[0] === gameSessionPda;
-      const player1ProfilePda = isPlayer1 ? profilePda : opponentProfilePda;
-      const player2ProfilePda = isPlayer1 ? opponentProfilePda : profilePda;
+      const { player1ProfilePda, player2ProfilePda, isPlayer1 } = await resolveProfilePdas(
+        publicKey, opponent, gameId!, gameSessionPda, profilePda,
+      );
 
       const choiceIx = getMakeChoiceInstruction({
         gameSession: gameSessionPda,
@@ -219,17 +213,17 @@ export function useGameSession() {
 
       console.log("Persisting results to L1...");
 
-      const { token } = await getTeeAuthToken(TEE_RPC_URL, kitWallet);
-      const teeRpc = createSolanaRpc(`${TEE_RPC_URL}?token=${token}`);
+      const teeRpc = await createAuthenticatedTeeRpc(TEE_RPC_URL, kitWallet);
       const signer = walletToSigner(kitWallet);
 
-      const [opponentProfilePda] = await derivePlayerProfilePda(opponent, RPS_GAME_PROGRAM_ID);
-      const isPlayer1 = (await deriveGameSessionPda(publicKey, opponent, gameId!, RPS_GAME_PROGRAM_ID))[0] === gameSessionPda;
+      const { player1ProfilePda, player2ProfilePda } = await resolveProfilePdas(
+        publicKey, opponent, gameId!, gameSessionPda, profilePda,
+      );
 
       const persistIx = getPersistResultsInstruction({
         gameSession: gameSessionPda,
-        player1Profile: isPlayer1 ? profilePda : opponentProfilePda,
-        player2Profile: isPlayer1 ? opponentProfilePda : profilePda,
+        player1Profile: player1ProfilePda,
+        player2Profile: player2ProfilePda,
         payer: signer,
       });
 
@@ -268,6 +262,24 @@ export function useGameSession() {
     makeChoice,
     persistResults,
     reset,
+  };
+}
+
+/** Resolves player1/player2 profile PDAs and whether the local player is player1. */
+async function resolveProfilePdas(
+  publicKey: Address,
+  opponent: Address,
+  gameId: bigint,
+  gameSessionPda: Address,
+  profilePda: Address,
+): Promise<{ player1ProfilePda: Address; player2ProfilePda: Address; isPlayer1: boolean }> {
+  const [derivedPda] = await deriveGameSessionPda(publicKey, opponent, gameId, RPS_GAME_PROGRAM_ID);
+  const isPlayer1 = derivedPda === gameSessionPda;
+  const [opponentProfilePda] = await derivePlayerProfilePda(opponent, RPS_GAME_PROGRAM_ID);
+  return {
+    player1ProfilePda: isPlayer1 ? profilePda : opponentProfilePda,
+    player2ProfilePda: isPlayer1 ? opponentProfilePda : profilePda,
+    isPlayer1,
   };
 }
 
