@@ -1,12 +1,19 @@
 import { atom } from "jotai";
 import type { Address } from "@solana/kit";
+import type { KitWallet } from "@/lib/utils/wallet-bridge";
 
 /**
- * Wallet address atom (Kit Address = string brand)
+ * Wallet address atom (Kit Address = branded string)
  */
 export const walletAtom = atom<Address | null>(null);
 
 /**
- * Wallet connected state atom
+ * Full wallet object atom — used for signing transactions without going through React Context.
+ * Set alongside walletAtom on connect; cleared on disconnect.
  */
-export const walletConnectedAtom = atom<boolean>(false);
+export const kitWalletAtom = atom<KitWallet | null>(null);
+
+/**
+ * Derived: true when a wallet is connected
+ */
+export const walletConnectedAtom = atom((get) => get(walletAtom) !== null);

@@ -5,12 +5,12 @@ import { useAtomValue } from "jotai";
 import type { Address } from "@solana/kit";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
-import { useWalletContext } from "@/lib/contexts/WalletContext";
+import { walletAtom, kitWalletAtom } from "@/lib/atoms/wallet";
+import { sessionKitWalletAtom, isSessionActiveAtom } from "@/lib/atoms/session";
 import { createAuthenticatedTeeRpc, waitForDelegation } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction } from "@/lib/utils/transaction";
 import { derivePlayerProfilePda, deriveTicketPda, deriveTenantPda, deriveGameSessionPda } from "@/lib/utils/pda";
-import { useSession } from "@/lib/contexts/SessionContext";
 import { deriveSessionTokenPda } from "@/lib/utils/session";
 import {
   RPS_GAME_PROGRAM_ID,
@@ -53,8 +53,10 @@ function toCodamaChoice(choice: Choice): CodamaChoice {
 }
 
 export function useGameSession() {
-  const { publicKey, kitWallet } = useWalletContext();
-  const { sessionKitWallet, isSessionActive } = useSession();
+  const publicKey = useAtomValue(walletAtom);
+  const kitWallet = useAtomValue(kitWalletAtom);
+  const sessionKitWallet = useAtomValue(sessionKitWalletAtom);
+  const isSessionActive = useAtomValue(isSessionActiveAtom);
   const rpc = useAtomValue(rpcAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
 

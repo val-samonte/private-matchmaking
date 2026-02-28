@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import { useWalletContext } from "@/lib/contexts/WalletContext";
+import { walletAtom, kitWalletAtom } from "@/lib/atoms/wallet";
 import { rpcAtom } from "@/lib/atoms/program";
 import { playerProfileAtom, playerProfilePdaAtom, hasProfileAtom } from "@/lib/atoms/player";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
@@ -14,7 +14,8 @@ import {
 } from "@sdk/generated/rps-game";
 
 export function usePlayerProfile() {
-  const { publicKey, kitWallet } = useWalletContext();
+  const publicKey = useAtomValue(walletAtom);
+  const kitWallet = useAtomValue(kitWalletAtom);
   const rpc = useAtomValue(rpcAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
   const [profile, setProfile] = useAtom(playerProfileAtom);

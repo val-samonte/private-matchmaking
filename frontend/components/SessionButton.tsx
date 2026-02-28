@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useAtomValue } from "jotai";
+import { isSessionActiveAtom } from "@/lib/atoms/session";
 import { useSession } from "@/lib/contexts/SessionContext";
 
 export function SessionButton() {
-  const { isSessionActive, createSession, clearSession } = useSession();
+  const isSessionActive = useAtomValue(isSessionActiveAtom);
+  const { createSession, clearSession } = useSession();
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

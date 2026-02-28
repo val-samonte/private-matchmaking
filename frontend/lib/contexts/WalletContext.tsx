@@ -1,14 +1,12 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import type { UiWallet, UiWalletAccount } from "@wallet-standard/ui";
 import type { Address } from "@solana/kit";
-import {
-  createWalletBridge,
-  type KitWallet,
-} from "@/lib/utils/wallet-bridge";
-import { walletAtom } from "@/lib/atoms/wallet";
+import { createWalletBridge, type KitWallet } from "@/lib/utils/wallet-bridge";
+import { walletAtom, kitWalletAtom, walletConnectedAtom } from "@/lib/atoms/wallet";
+import { sessionSignerAtom } from "@/lib/atoms/session";
 
 interface WalletContextType {
   wallet: UiWallet | null;
@@ -35,32 +33,37 @@ export function useWalletContext() {
 }
 
 export function WalletContextProvider({ children }: { children: ReactNode }) {
+  // wallet/account kept local — wallet-standard UI objects, not needed in global state
   const [wallet, setWallet] = useState<UiWallet | null>(null);
   const [account, setAccount] = useState<UiWalletAccount | null>(null);
-  const [kitWallet, setKitWallet] = useState<KitWallet | null>(null);
-  const [publicKey, setPublicKey] = useState<Address | null>(null);
+
+  // On-chain state lives in atoms so any component can react to it
   const setWalletAtom = useSetAtom(walletAtom);
+  const setKitWalletAtom = useSetAtom(kitWalletAtom);
+  const setSessionSigner = useSetAtom(sessionSignerAtom);
+  const publicKey = useAtomValue(walletAtom);
+  const kitWallet = useAtomValue(kitWalletAtom);
+  const connected = useAtomValue(walletConnectedAtom);
 
   const connect = useCallback((w: UiWallet, a: UiWalletAccount) => {
     const addr = a.address as Address;
     setWallet(w);
     setAccount(a);
-    setPublicKey(addr);
     setWalletAtom(addr);
-    setKitWallet(createWalletBridge(w, a));
-  }, [setWalletAtom]);
+    setKitWalletAtom(createWalletBridge(w, a));
+  }, [setWalletAtom, setKitWalletAtom]);
 
   const disconnect = useCallback(() => {
     setWallet(null);
     setAccount(null);
-    setPublicKey(null);
     setWalletAtom(null);
-    setKitWallet(null);
-  }, [setWalletAtom]);
+    setKitWalletAtom(null);
+    setSessionSigner(null); // auto-invalidate session key on wallet disconnect
+  }, [setWalletAtom, setKitWalletAtom, setSessionSigner]);
 
   return (
     <WalletContext.Provider
-      value={{ wallet, account, publicKey, connected: !!account, kitWallet, connect, disconnect }}
+      value={{ wallet, account, publicKey, connected, kitWallet, connect, disconnect }}
     >
       {children}
     </WalletContext.Provider>

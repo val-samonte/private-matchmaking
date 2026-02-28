@@ -4,7 +4,7 @@ import { useCallback, useState, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { playerProfilePdaAtom } from "@/lib/atoms/player";
 import { rpcAtom } from "@/lib/atoms/program";
-import { useWalletContext } from "@/lib/contexts/WalletContext";
+import { walletAtom, kitWalletAtom } from "@/lib/atoms/wallet";
 import { createAuthenticatedTeeRpc } from "@/lib/utils/tee";
 import { walletToSigner } from "@/lib/utils/wallet-bridge";
 import { sendInstruction, sendInstructions, withRemainingAccounts } from "@/lib/utils/transaction";
@@ -56,7 +56,8 @@ type MatchResult = {
 };
 
 export function useMatchmaking() {
-  const { publicKey, kitWallet } = useWalletContext();
+  const publicKey = useAtomValue(walletAtom);
+  const kitWallet = useAtomValue(kitWalletAtom);
   const profilePda = useAtomValue(playerProfilePdaAtom);
   const rpc = useAtomValue(rpcAtom);
 
