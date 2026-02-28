@@ -17,16 +17,16 @@ export function getInitializeTenantDiscriminatorBytes() { return fixEncoderSize(
 export type InitializeTenantInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTenant extends string | AccountMeta<string> = string, TAccountAuthority extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
 Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTenant extends string ? WritableAccount<TAccountTenant> : TAccountTenant, TAccountAuthority extends string ? WritableSignerAccount<TAccountAuthority> & AccountSignerMeta<TAccountAuthority> : TAccountAuthority, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
-export type InitializeTenantInstructionData = { discriminator: ReadonlyUint8Array; tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: bigint; callbackProgramId: Option<Address>; callbackDiscriminator: Option<ReadonlyUint8Array>;  };
+export type InitializeTenantInstructionData = { discriminator: ReadonlyUint8Array; tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: bigint; callbackProgramId: Option<Address>; callbackDiscriminator: Option<ReadonlyUint8Array>; sessionProgram: Option<Address>;  };
 
-export type InitializeTenantInstructionDataArgs = { tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: number | bigint; callbackProgramId: OptionOrNullable<Address>; callbackDiscriminator: OptionOrNullable<ReadonlyUint8Array>;  };
+export type InitializeTenantInstructionDataArgs = { tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: number | bigint; callbackProgramId: OptionOrNullable<Address>; callbackDiscriminator: OptionOrNullable<ReadonlyUint8Array>; sessionProgram: OptionOrNullable<Address>;  };
 
 export function getInitializeTenantInstructionDataEncoder(): Encoder<InitializeTenantInstructionDataArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['tenantProgramId', getAddressEncoder()], ['eloOffset', getU32Encoder()], ['eloSize', getU8Encoder()], ['eloWindow', getU64Encoder()], ['callbackProgramId', getOptionEncoder(getAddressEncoder())], ['callbackDiscriminator', getOptionEncoder(fixEncoderSize(getBytesEncoder(), 8))]]), (value) => ({ ...value, discriminator: INITIALIZE_TENANT_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['tenantProgramId', getAddressEncoder()], ['eloOffset', getU32Encoder()], ['eloSize', getU8Encoder()], ['eloWindow', getU64Encoder()], ['callbackProgramId', getOptionEncoder(getAddressEncoder())], ['callbackDiscriminator', getOptionEncoder(fixEncoderSize(getBytesEncoder(), 8))], ['sessionProgram', getOptionEncoder(getAddressEncoder())]]), (value) => ({ ...value, discriminator: INITIALIZE_TENANT_DISCRIMINATOR }));
 }
 
 export function getInitializeTenantInstructionDataDecoder(): Decoder<InitializeTenantInstructionData> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['tenantProgramId', getAddressDecoder()], ['eloOffset', getU32Decoder()], ['eloSize', getU8Decoder()], ['eloWindow', getU64Decoder()], ['callbackProgramId', getOptionDecoder(getAddressDecoder())], ['callbackDiscriminator', getOptionDecoder(fixDecoderSize(getBytesDecoder(), 8))]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['tenantProgramId', getAddressDecoder()], ['eloOffset', getU32Decoder()], ['eloSize', getU8Decoder()], ['eloWindow', getU64Decoder()], ['callbackProgramId', getOptionDecoder(getAddressDecoder())], ['callbackDiscriminator', getOptionDecoder(fixDecoderSize(getBytesDecoder(), 8))], ['sessionProgram', getOptionDecoder(getAddressDecoder())]]);
 }
 
 export function getInitializeTenantInstructionDataCodec(): Codec<InitializeTenantInstructionDataArgs, InitializeTenantInstructionData> {
@@ -43,6 +43,7 @@ eloSize: InitializeTenantInstructionDataArgs["eloSize"];
 eloWindow: InitializeTenantInstructionDataArgs["eloWindow"];
 callbackProgramId: InitializeTenantInstructionDataArgs["callbackProgramId"];
 callbackDiscriminator: InitializeTenantInstructionDataArgs["callbackDiscriminator"];
+sessionProgram: InitializeTenantInstructionDataArgs["sessionProgram"];
 }
 
 export async function getInitializeTenantInstructionAsync<TAccountTenant extends string, TAccountAuthority extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: InitializeTenantAsyncInput<TAccountTenant, TAccountAuthority, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<InitializeTenantInstruction<TProgramAddress, TAccountTenant, TAccountAuthority, TAccountSystemProgram>> {
@@ -80,6 +81,7 @@ eloSize: InitializeTenantInstructionDataArgs["eloSize"];
 eloWindow: InitializeTenantInstructionDataArgs["eloWindow"];
 callbackProgramId: InitializeTenantInstructionDataArgs["callbackProgramId"];
 callbackDiscriminator: InitializeTenantInstructionDataArgs["callbackDiscriminator"];
+sessionProgram: InitializeTenantInstructionDataArgs["sessionProgram"];
 }
 
 export function getInitializeTenantInstruction<TAccountTenant extends string, TAccountAuthority extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: InitializeTenantInput<TAccountTenant, TAccountAuthority, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): InitializeTenantInstruction<TProgramAddress, TAccountTenant, TAccountAuthority, TAccountSystemProgram> {

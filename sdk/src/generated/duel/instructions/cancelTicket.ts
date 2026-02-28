@@ -14,8 +14,8 @@ export const CANCEL_TICKET_DISCRIMINATOR = new Uint8Array([216, 28, 247, 206, 19
 
 export function getCancelTicketDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(CANCEL_TICKET_DISCRIMINATOR); }
 
-export type CancelTicketInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTicket extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTicket extends string ? WritableAccount<TAccountTicket> : TAccountTicket, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayer extends string ? ReadonlySignerAccount<TAccountPlayer> & AccountSignerMeta<TAccountPlayer> : TAccountPlayer, ...TRemainingAccounts]>;
+export type CancelTicketInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTicket extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TAccountSessionToken extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTicket extends string ? WritableAccount<TAccountTicket> : TAccountTicket, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayer extends string ? ReadonlyAccount<TAccountPlayer> : TAccountPlayer, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, TAccountSessionToken extends string ? ReadonlyAccount<TAccountSessionToken> : TAccountSessionToken, ...TRemainingAccounts]>;
 
 export type CancelTicketInstructionData = { discriminator: ReadonlyUint8Array;  };
 
@@ -33,18 +33,20 @@ export function getCancelTicketInstructionDataCodec(): FixedSizeCodec<CancelTick
     return combineCodec(getCancelTicketInstructionDataEncoder(), getCancelTicketInstructionDataDecoder());
 }
 
-export type CancelTicketAsyncInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string> =  {
+export type CancelTicketAsyncInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   ticket?: Address<TAccountTicket>;
 tenant: Address<TAccountTenant>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 }
 
-export async function getCancelTicketInstructionAsync<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CancelTicketAsyncInput<TAccountTicket, TAccountTenant, TAccountPlayer>, config?: { programAddress?: TProgramAddress } ): Promise<CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer>> {
+export async function getCancelTicketInstructionAsync<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CancelTicketAsyncInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): Promise<CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: false } }
+const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
@@ -54,28 +56,30 @@ accounts.ticket.value = await getProgramDerivedAddress({ programAddress, seeds: 
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player)], data: getCancelTicketInstructionDataEncoder().encode({}), programAddress } as CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer>);
+return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getCancelTicketInstructionDataEncoder().encode({}), programAddress } as CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>);
 }
 
-export type CancelTicketInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string> =  {
+export type CancelTicketInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   ticket: Address<TAccountTicket>;
 tenant: Address<TAccountTenant>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 }
 
-export function getCancelTicketInstruction<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CancelTicketInput<TAccountTicket, TAccountTenant, TAccountPlayer>, config?: { programAddress?: TProgramAddress } ): CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer> {
+export function getCancelTicketInstruction<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CancelTicketInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: false } }
+const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
 
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player)], data: getCancelTicketInstructionDataEncoder().encode({}), programAddress } as CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer>);
+return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getCancelTicketInstructionDataEncoder().encode({}), programAddress } as CancelTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>);
 }
 
 export type ParsedCancelTicketInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -83,12 +87,14 @@ accounts: {
 ticket: TAccountMetas[0];
 tenant: TAccountMetas[1];
 player: TAccountMetas[2];
+signer: TAccountMetas[3];
+sessionToken?: TAccountMetas[4] | undefined;
 };
 data: CancelTicketInstructionData; };
 
 export function parseCancelTicketInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedCancelTicketInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
-  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 3 });
+  if (instruction.accounts.length < 5) {
+  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 5 });
 }
 let accountIndex = 0;
 const getNextAccount = () => {
@@ -96,5 +102,9 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { ticket: getNextAccount(), tenant: getNextAccount(), player: getNextAccount() }, data: getCancelTicketInstructionDataDecoder().decode(instruction.data) };
+const getNextOptionalAccount = () => {
+  const accountMeta = getNextAccount();
+  return accountMeta.address === DUEL_PROGRAM_ADDRESS ? undefined : accountMeta;
+};
+  return { programAddress: instruction.programAddress, accounts: { ticket: getNextAccount(), tenant: getNextAccount(), player: getNextAccount(), signer: getNextAccount(), sessionToken: getNextOptionalAccount() }, data: getCancelTicketInstructionDataDecoder().decode(instruction.data) };
 }

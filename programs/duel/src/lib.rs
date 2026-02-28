@@ -13,6 +13,53 @@ declare_id!("EdZzUwKd1X2ZWjxLPpz1cpEzMF7RUZC43Pq64v1VcK5X");
 
 pub const TICKET_SEED: &[u8] = b"ticket";
 
+// Gum Session Keys — enables gasless matchmaking via ephemeral session signers.
+// SessionToken layout (owner: KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5):
+//   [0..8]    discriminator
+//   [8..40]   authority: Pubkey   (the real player's wallet)
+//   [40..72]  target_program: Pubkey
+//   [72..104] session_signer: Pubkey
+//   [104..112] valid_until: i64
+struct ParsedSessionToken {
+    authority: Pubkey,
+    target_program: Pubkey,
+    session_signer: Pubkey,
+    valid_until: i64,
+}
+
+fn parse_session_token(account: &AccountInfo, allowed_program: &Pubkey) -> Result<ParsedSessionToken> {
+    require!(account.owner == allowed_program, MatchmakingError::InvalidSession);
+    let data = account.try_borrow_data()?;
+    require!(data.len() >= 112, MatchmakingError::InvalidSession);
+    let authority = Pubkey::new_from_array(data[8..40].try_into().unwrap());
+    let target_program = Pubkey::new_from_array(data[40..72].try_into().unwrap());
+    let session_signer = Pubkey::new_from_array(data[72..104].try_into().unwrap());
+    let valid_until = i64::from_le_bytes(data[104..112].try_into().unwrap());
+    Ok(ParsedSessionToken { authority, target_program, session_signer, valid_until })
+}
+
+/// Resolves the "real" player pubkey from either a session token or a direct signer.
+/// - No token: player == signer (direct wallet TX).
+/// - Token present: validates owner (against session_program), target_program, expiry, and session_signer; returns authority.
+/// - Token present but session_program is None: error (Tenant must configure a session program to accept session tokens).
+fn resolve_player<'a>(
+    signer_key: &Pubkey,
+    session_token: Option<&UncheckedAccount<'a>>,
+    session_program: Option<&Pubkey>,
+) -> Result<Pubkey> {
+    if let Some(token_account) = session_token {
+        let allowed = session_program.ok_or(error!(MatchmakingError::InvalidSession))?;
+        let token = parse_session_token(token_account.as_ref(), allowed)?;
+        let clock = Clock::get()?;
+        require!(token.session_signer == *signer_key, MatchmakingError::InvalidSession);
+        require!(token.target_program == crate::ID, MatchmakingError::InvalidSession);
+        require!(token.valid_until > clock.unix_timestamp, MatchmakingError::SessionExpired);
+        Ok(token.authority)
+    } else {
+        Ok(*signer_key)
+    }
+}
+
 #[ephemeral]
 #[program]
 pub mod duel {
@@ -26,6 +73,7 @@ pub mod duel {
         elo_window: u64,
         callback_program_id: Option<Pubkey>,
         callback_discriminator: Option<[u8; 8]>,
+        session_program: Option<Pubkey>,
     ) -> Result<()> {
         let tenant = &mut ctx.accounts.tenant;
         tenant.authority = ctx.accounts.authority.key();
@@ -35,6 +83,7 @@ pub mod duel {
         tenant.elo_window = elo_window;
         tenant.callback_program_id = callback_program_id;
         tenant.callback_discriminator = callback_discriminator;
+        tenant.session_program = session_program;
         msg!(
             "Tenant Initialized for Program: {} (ELO size: {} bytes)",
             tenant_program_id,
@@ -71,6 +120,13 @@ pub mod duel {
 
     /// Player creates a MatchTicket PDA on L1
     pub fn create_ticket(ctx: Context<CreateTicket>) -> Result<()> {
+        let real_player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+            ctx.accounts.tenant.session_program.as_ref(),
+        )?;
+        require!(real_player == ctx.accounts.player.key(), MatchmakingError::Unauthorized);
+
         let ticket = &mut ctx.accounts.ticket;
         ticket.player = ctx.accounts.player.key();
         ticket.tenant = ctx.accounts.tenant.key();
@@ -135,9 +191,19 @@ pub mod duel {
         Ok(())
     }
 
-    /// Set up permission for ticket PDA so queueAuthority can write it on TEE.
-    /// Must be called BEFORE delegate_ticket while the program still owns the PDA.
-    pub fn setup_ticket_permission(ctx: Context<SetupTicketPermission>) -> Result<()> {
+    /// Set up permission for ticket PDA so queueAuthority (and optionally a session key) can
+    /// read/write it on TEE.  Must be called BEFORE delegate_ticket while the program still owns the PDA.
+    pub fn setup_ticket_permission(
+        ctx: Context<SetupTicketPermission>,
+        session_key: Option<Pubkey>,
+    ) -> Result<()> {
+        let real_player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+            ctx.accounts.tenant.session_program.as_ref(),
+        )?;
+        require!(real_player == ctx.accounts.player.key(), MatchmakingError::Unauthorized);
+
         let ticket = &ctx.accounts.ticket;
         let queue_authority = ctx.accounts.tenant.authority;
         let player = ctx.accounts.player.key();
@@ -146,20 +212,25 @@ pub mod duel {
 
         let permission_program_info = &ctx.accounts.permission_program;
 
+        let mut members = vec![
+            Member { flags: AUTHORITY_FLAG, pubkey: player },
+            Member { flags: AUTHORITY_FLAG, pubkey: queue_authority },
+        ];
+        if let Some(sk) = session_key {
+            members.push(Member { flags: AUTHORITY_FLAG, pubkey: sk });
+        }
+
         CreatePermissionCpi::new(
             permission_program_info,
             CreatePermissionCpiAccounts {
                 permissioned_account: &ctx.accounts.ticket.to_account_info(),
                 permission: &ctx.accounts.permission,
-                payer: &ctx.accounts.player.to_account_info(),
+                payer: &ctx.accounts.payer.to_account_info(),
                 system_program: &ctx.accounts.system_program.to_account_info(),
             },
             CreatePermissionInstructionArgs {
                 args: MembersArgs {
-                    members: Some(vec![
-                        Member { flags: AUTHORITY_FLAG, pubkey: player },
-                        Member { flags: AUTHORITY_FLAG, pubkey: queue_authority },
-                    ]),
+                    members: Some(members),
                 },
             },
         ).invoke_signed(&[&[
@@ -174,6 +245,13 @@ pub mod duel {
 
     /// Player cancels search, marks ticket as Cancelled (runs in TEE)
     pub fn cancel_ticket(ctx: Context<CancelTicket>) -> Result<()> {
+        let real_player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+            ctx.accounts.tenant.session_program.as_ref(),
+        )?;
+        require!(real_player == ctx.accounts.player.key(), MatchmakingError::Unauthorized);
+
         let ticket = &mut ctx.accounts.ticket;
         require!(
             matches!(ticket.status, TicketStatus::Searching),
@@ -189,22 +267,35 @@ pub mod duel {
     }
 
     /// Reclaim rent after match consumed or cancelled (L1)
-    pub fn close_ticket(_ctx: Context<CloseTicket>) -> Result<()> {
-        // Account is closed via the `close` constraint
-        msg!("Ticket closed and rent reclaimed");
+    pub fn close_ticket(ctx: Context<CloseTicket>) -> Result<()> {
+        let real_player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+            ctx.accounts.tenant.session_program.as_ref(),
+        )?;
+        require!(real_player == ctx.accounts.player.key(), MatchmakingError::Unauthorized);
+        // Account is closed and rent returned to player via the `close = player` constraint
+        msg!("Ticket closed and rent reclaimed for player {}", ctx.accounts.player.key());
         Ok(())
     }
 
     /// Modified join_queue: now requires player's MatchTicket
     pub fn join_queue<'a>(ctx: Context<'_, '_, 'a, 'a, JoinQueue<'a>>) -> Result<()> {
-        // 1. Verify ticket
+        // 1. Resolve the real player and verify ticket
+        let real_player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+            ctx.accounts.tenant.session_program.as_ref(),
+        )?;
+        require!(real_player == ctx.accounts.player.key(), MatchmakingError::Unauthorized);
+
         let ticket = &ctx.accounts.player_ticket;
         require!(
             matches!(ticket.status, TicketStatus::Searching),
             MatchmakingError::InvalidTicketStatus
         );
         require!(
-            ticket.player == ctx.accounts.signer.key(),
+            ticket.player == ctx.accounts.player.key(),
             MatchmakingError::Unauthorized
         );
 
@@ -258,7 +349,7 @@ pub mod duel {
 
         // 4. Insert into Queue
         let entry = QueueEntry {
-            player: ctx.accounts.signer.key(),
+            player: ctx.accounts.player.key(),
             elo,
         };
         ctx.accounts.queue.entries.push(entry);
@@ -559,15 +650,20 @@ pub struct DelegateQueue<'info> {
 pub struct CreateTicket<'info> {
     #[account(
         init,
-        payer = player,
+        payer = payer,
         space = 8 + MatchTicket::LEN,
         seeds = [TICKET_SEED, player.key().as_ref(), tenant.key().as_ref()],
         bump
     )]
     pub ticket: Account<'info, MatchTicket>,
     pub tenant: Account<'info, Tenant>,
+    /// CHECK: Real player wallet for PDA seeds — validated by resolve_player in handler
+    pub player: UncheckedAccount<'info>,
+    pub signer: Signer<'info>,
     #[account(mut)]
-    pub player: Signer<'info>,
+    pub payer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -596,8 +692,13 @@ pub struct SetupTicketPermission<'info> {
     )]
     pub ticket: Account<'info, MatchTicket>,
     pub tenant: Account<'info, Tenant>,
+    /// CHECK: Real player wallet for PDA seeds — validated by resolve_player in handler
+    pub player: UncheckedAccount<'info>,
+    pub signer: Signer<'info>,
     #[account(mut)]
-    pub player: Signer<'info>,
+    pub payer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
     /// CHECK: Permission PDA derived from ticket (seeds: [b"permission:", ticket_key])
     #[account(mut)]
     pub permission: AccountInfo<'info>,
@@ -627,7 +728,11 @@ pub struct CancelTicket<'info> {
     )]
     pub ticket: Account<'info, MatchTicket>,
     pub tenant: Account<'info, Tenant>,
-    pub player: Signer<'info>,
+    /// CHECK: Real player wallet for PDA seeds — validated by resolve_player in handler
+    pub player: UncheckedAccount<'info>,
+    pub signer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
 }
 
 #[derive(Accounts)]
@@ -641,8 +746,12 @@ pub struct CloseTicket<'info> {
     )]
     pub ticket: Account<'info, MatchTicket>,
     pub tenant: Account<'info, Tenant>,
+    /// CHECK: Real player wallet — receives reclaimed rent, used for PDA seeds
     #[account(mut)]
-    pub player: Signer<'info>,
+    pub player: UncheckedAccount<'info>,
+    pub signer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
 }
 
 #[derive(Accounts)]
@@ -657,11 +766,15 @@ pub struct JoinQueue<'info> {
     pub player_data: AccountInfo<'info>,
     #[account(
         mut,
-        seeds = [TICKET_SEED, signer.key().as_ref(), tenant.key().as_ref()],
+        seeds = [TICKET_SEED, player.key().as_ref(), tenant.key().as_ref()],
         bump = player_ticket.bump,
     )]
     pub player_ticket: Account<'info, MatchTicket>,
+    /// CHECK: Real player wallet for ticket seeds — validated by resolve_player in handler
+    pub player: UncheckedAccount<'info>,
     pub signer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
 }
 
 #[derive(Accounts)]
@@ -755,11 +868,14 @@ pub struct Tenant {
     pub elo_window: u64,
     pub callback_program_id: Option<Pubkey>,
     pub callback_discriminator: Option<[u8; 8]>,
+    /// Optional session-keys program that may issue session tokens for this Tenant.
+    /// If None, session tokens are rejected; direct wallet signing is always accepted.
+    pub session_program: Option<Pubkey>,
 }
 
 impl Tenant {
-    // 32 + 32 + 4 + 1 + 8 + 1+32 + 1+8 = 119
-    pub const LEN: usize = 32 + 32 + 4 + 1 + 8 + (1 + 32) + (1 + 8);
+    // 32 + 32 + 4 + 1 + 8 + (1+32) + (1+8) + (1+32) = 152
+    pub const LEN: usize = 32 + 32 + 4 + 1 + 8 + (1 + 32) + (1 + 8) + (1 + 32);
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
@@ -782,6 +898,10 @@ pub enum MatchmakingError {
     InvalidTicketStatus,
     #[msg("Invalid ticket account")]
     InvalidTicketAccount,
+    #[msg("Invalid session token")]
+    InvalidSession,
+    #[msg("Session token expired")]
+    SessionExpired,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

@@ -6,7 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, getU64Decoder, getU64Encoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
+import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getOptionDecoder, getOptionEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, getU64Decoder, getU64Encoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type Codec, type Decoder, type Encoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type Option, type OptionOrNullable, type ReadonlyAccount, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
 import { getAccountMetaFactory, getAddressFromResolvedInstructionAccount, getNonNullResolvedInstructionInput, type ResolvedInstructionAccount } from '@solana/program-client-core';
 import { RPS_GAME_PROGRAM_ADDRESS } from '../programs';
 
@@ -14,40 +14,44 @@ export const START_GAME_WITH_TICKET_DISCRIMINATOR = new Uint8Array([2, 250, 253,
 
 export function getStartGameWithTicketDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(START_GAME_WITH_TICKET_DISCRIMINATOR); }
 
-export type StartGameWithTicketInstruction<TProgram extends string = typeof RPS_GAME_PROGRAM_ADDRESS, TAccountGameSession extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountMatchTicket extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountGameSession extends string ? WritableAccount<TAccountGameSession> : TAccountGameSession, TAccountPlayer extends string ? WritableSignerAccount<TAccountPlayer> & AccountSignerMeta<TAccountPlayer> : TAccountPlayer, TAccountMatchTicket extends string ? ReadonlyAccount<TAccountMatchTicket> : TAccountMatchTicket, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
+export type StartGameWithTicketInstruction<TProgram extends string = typeof RPS_GAME_PROGRAM_ADDRESS, TAccountGameSession extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TAccountPayer extends string | AccountMeta<string> = string, TAccountSessionToken extends string | AccountMeta<string> = string, TAccountMatchTicket extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountGameSession extends string ? WritableAccount<TAccountGameSession> : TAccountGameSession, TAccountPlayer extends string ? ReadonlyAccount<TAccountPlayer> : TAccountPlayer, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, TAccountPayer extends string ? WritableSignerAccount<TAccountPayer> & AccountSignerMeta<TAccountPayer> : TAccountPayer, TAccountSessionToken extends string ? ReadonlyAccount<TAccountSessionToken> : TAccountSessionToken, TAccountMatchTicket extends string ? ReadonlyAccount<TAccountMatchTicket> : TAccountMatchTicket, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
-export type StartGameWithTicketInstructionData = { discriminator: ReadonlyUint8Array; gameId: bigint; opponent: Address;  };
+export type StartGameWithTicketInstructionData = { discriminator: ReadonlyUint8Array; gameId: bigint; opponent: Address; sessionProgram: Option<Address>;  };
 
-export type StartGameWithTicketInstructionDataArgs = { gameId: number | bigint; opponent: Address;  };
+export type StartGameWithTicketInstructionDataArgs = { gameId: number | bigint; opponent: Address; sessionProgram: OptionOrNullable<Address>;  };
 
-export function getStartGameWithTicketInstructionDataEncoder(): FixedSizeEncoder<StartGameWithTicketInstructionDataArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['gameId', getU64Encoder()], ['opponent', getAddressEncoder()]]), (value) => ({ ...value, discriminator: START_GAME_WITH_TICKET_DISCRIMINATOR }));
+export function getStartGameWithTicketInstructionDataEncoder(): Encoder<StartGameWithTicketInstructionDataArgs> {
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['gameId', getU64Encoder()], ['opponent', getAddressEncoder()], ['sessionProgram', getOptionEncoder(getAddressEncoder())]]), (value) => ({ ...value, discriminator: START_GAME_WITH_TICKET_DISCRIMINATOR }));
 }
 
-export function getStartGameWithTicketInstructionDataDecoder(): FixedSizeDecoder<StartGameWithTicketInstructionData> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['gameId', getU64Decoder()], ['opponent', getAddressDecoder()]]);
+export function getStartGameWithTicketInstructionDataDecoder(): Decoder<StartGameWithTicketInstructionData> {
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['gameId', getU64Decoder()], ['opponent', getAddressDecoder()], ['sessionProgram', getOptionDecoder(getAddressDecoder())]]);
 }
 
-export function getStartGameWithTicketInstructionDataCodec(): FixedSizeCodec<StartGameWithTicketInstructionDataArgs, StartGameWithTicketInstructionData> {
+export function getStartGameWithTicketInstructionDataCodec(): Codec<StartGameWithTicketInstructionDataArgs, StartGameWithTicketInstructionData> {
     return combineCodec(getStartGameWithTicketInstructionDataEncoder(), getStartGameWithTicketInstructionDataDecoder());
 }
 
-export type StartGameWithTicketAsyncInput<TAccountGameSession extends string = string, TAccountPlayer extends string = string, TAccountMatchTicket extends string = string, TAccountSystemProgram extends string = string> =  {
+export type StartGameWithTicketAsyncInput<TAccountGameSession extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountPayer extends string = string, TAccountSessionToken extends string = string, TAccountMatchTicket extends string = string, TAccountSystemProgram extends string = string> =  {
   gameSession?: Address<TAccountGameSession>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+payer: TransactionSigner<TAccountPayer>;
+sessionToken?: Address<TAccountSessionToken>;
 matchTicket: Address<TAccountMatchTicket>;
 systemProgram?: Address<TAccountSystemProgram>;
 gameId: StartGameWithTicketInstructionDataArgs["gameId"];
 opponent: StartGameWithTicketInstructionDataArgs["opponent"];
+sessionProgram: StartGameWithTicketInstructionDataArgs["sessionProgram"];
 }
 
-export async function getStartGameWithTicketInstructionAsync<TAccountGameSession extends string, TAccountPlayer extends string, TAccountMatchTicket extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof RPS_GAME_PROGRAM_ADDRESS>(input: StartGameWithTicketAsyncInput<TAccountGameSession, TAccountPlayer, TAccountMatchTicket, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountMatchTicket, TAccountSystemProgram>> {
+export async function getStartGameWithTicketInstructionAsync<TAccountGameSession extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountPayer extends string, TAccountSessionToken extends string, TAccountMatchTicket extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof RPS_GAME_PROGRAM_ADDRESS>(input: StartGameWithTicketAsyncInput<TAccountGameSession, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountMatchTicket, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountMatchTicket, TAccountSystemProgram>> {
   // Program address.
 const programAddress = config?.programAddress ?? RPS_GAME_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { gameSession: { value: input.gameSession ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: true }, matchTicket: { value: input.matchTicket ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
+const originalAccounts = { gameSession: { value: input.gameSession ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, payer: { value: input.payer ?? null, isWritable: true }, sessionToken: { value: input.sessionToken ?? null, isWritable: false }, matchTicket: { value: input.matchTicket ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
@@ -64,24 +68,28 @@ accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("gameSession", accounts.gameSession), getAccountMeta("player", accounts.player), getAccountMeta("matchTicket", accounts.matchTicket), getAccountMeta("systemProgram", accounts.systemProgram)], data: getStartGameWithTicketInstructionDataEncoder().encode(args as StartGameWithTicketInstructionDataArgs), programAddress } as StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountMatchTicket, TAccountSystemProgram>);
+return Object.freeze({ accounts: [getAccountMeta("gameSession", accounts.gameSession), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("payer", accounts.payer), getAccountMeta("sessionToken", accounts.sessionToken), getAccountMeta("matchTicket", accounts.matchTicket), getAccountMeta("systemProgram", accounts.systemProgram)], data: getStartGameWithTicketInstructionDataEncoder().encode(args as StartGameWithTicketInstructionDataArgs), programAddress } as StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountMatchTicket, TAccountSystemProgram>);
 }
 
-export type StartGameWithTicketInput<TAccountGameSession extends string = string, TAccountPlayer extends string = string, TAccountMatchTicket extends string = string, TAccountSystemProgram extends string = string> =  {
+export type StartGameWithTicketInput<TAccountGameSession extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountPayer extends string = string, TAccountSessionToken extends string = string, TAccountMatchTicket extends string = string, TAccountSystemProgram extends string = string> =  {
   gameSession: Address<TAccountGameSession>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+payer: TransactionSigner<TAccountPayer>;
+sessionToken?: Address<TAccountSessionToken>;
 matchTicket: Address<TAccountMatchTicket>;
 systemProgram?: Address<TAccountSystemProgram>;
 gameId: StartGameWithTicketInstructionDataArgs["gameId"];
 opponent: StartGameWithTicketInstructionDataArgs["opponent"];
+sessionProgram: StartGameWithTicketInstructionDataArgs["sessionProgram"];
 }
 
-export function getStartGameWithTicketInstruction<TAccountGameSession extends string, TAccountPlayer extends string, TAccountMatchTicket extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof RPS_GAME_PROGRAM_ADDRESS>(input: StartGameWithTicketInput<TAccountGameSession, TAccountPlayer, TAccountMatchTicket, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountMatchTicket, TAccountSystemProgram> {
+export function getStartGameWithTicketInstruction<TAccountGameSession extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountPayer extends string, TAccountSessionToken extends string, TAccountMatchTicket extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof RPS_GAME_PROGRAM_ADDRESS>(input: StartGameWithTicketInput<TAccountGameSession, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountMatchTicket, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountMatchTicket, TAccountSystemProgram> {
   // Program address.
 const programAddress = config?.programAddress ?? RPS_GAME_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { gameSession: { value: input.gameSession ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: true }, matchTicket: { value: input.matchTicket ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
+const originalAccounts = { gameSession: { value: input.gameSession ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, payer: { value: input.payer ?? null, isWritable: true }, sessionToken: { value: input.sessionToken ?? null, isWritable: false }, matchTicket: { value: input.matchTicket ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
@@ -95,21 +103,24 @@ accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("gameSession", accounts.gameSession), getAccountMeta("player", accounts.player), getAccountMeta("matchTicket", accounts.matchTicket), getAccountMeta("systemProgram", accounts.systemProgram)], data: getStartGameWithTicketInstructionDataEncoder().encode(args as StartGameWithTicketInstructionDataArgs), programAddress } as StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountMatchTicket, TAccountSystemProgram>);
+return Object.freeze({ accounts: [getAccountMeta("gameSession", accounts.gameSession), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("payer", accounts.payer), getAccountMeta("sessionToken", accounts.sessionToken), getAccountMeta("matchTicket", accounts.matchTicket), getAccountMeta("systemProgram", accounts.systemProgram)], data: getStartGameWithTicketInstructionDataEncoder().encode(args as StartGameWithTicketInstructionDataArgs), programAddress } as StartGameWithTicketInstruction<TProgramAddress, TAccountGameSession, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountMatchTicket, TAccountSystemProgram>);
 }
 
 export type ParsedStartGameWithTicketInstruction<TProgram extends string = typeof RPS_GAME_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
 accounts: {
 gameSession: TAccountMetas[0];
 player: TAccountMetas[1];
-matchTicket: TAccountMetas[2];
-systemProgram: TAccountMetas[3];
+signer: TAccountMetas[2];
+payer: TAccountMetas[3];
+sessionToken?: TAccountMetas[4] | undefined;
+matchTicket: TAccountMetas[5];
+systemProgram: TAccountMetas[6];
 };
 data: StartGameWithTicketInstructionData; };
 
 export function parseStartGameWithTicketInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedStartGameWithTicketInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 4) {
-  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 4 });
+  if (instruction.accounts.length < 7) {
+  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 7 });
 }
 let accountIndex = 0;
 const getNextAccount = () => {
@@ -117,5 +128,9 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { gameSession: getNextAccount(), player: getNextAccount(), matchTicket: getNextAccount(), systemProgram: getNextAccount() }, data: getStartGameWithTicketInstructionDataDecoder().decode(instruction.data) };
+const getNextOptionalAccount = () => {
+  const accountMeta = getNextAccount();
+  return accountMeta.address === RPS_GAME_PROGRAM_ADDRESS ? undefined : accountMeta;
+};
+  return { programAddress: instruction.programAddress, accounts: { gameSession: getNextAccount(), player: getNextAccount(), signer: getNextAccount(), payer: getNextAccount(), sessionToken: getNextOptionalAccount(), matchTicket: getNextAccount(), systemProgram: getNextAccount() }, data: getStartGameWithTicketInstructionDataDecoder().decode(instruction.data) };
 }

@@ -27,11 +27,8 @@ struct ParsedSessionToken {
     valid_until: i64,
 }
 
-fn parse_session_token(account: &AccountInfo) -> Result<ParsedSessionToken> {
-    let gum: Pubkey = "KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5"
-        .parse()
-        .unwrap();
-    require!(account.owner == &gum, GameError::InvalidSession);
+fn parse_session_token(account: &AccountInfo, allowed_program: &Pubkey) -> Result<ParsedSessionToken> {
+    require!(account.owner == allowed_program, GameError::InvalidSession);
     let data = account.try_borrow_data()?;
     require!(data.len() >= 112, GameError::InvalidSession);
     let authority = Pubkey::new_from_array(data[8..40].try_into().unwrap());
@@ -43,13 +40,16 @@ fn parse_session_token(account: &AccountInfo) -> Result<ParsedSessionToken> {
 
 /// Resolves the "real" player pubkey from either a session token or a direct signer.
 /// - No token: player == signer (direct wallet TX).
-/// - Token present: validates owner, target_program, expiry, and session_signer; returns authority.
+/// - Token present: validates owner (against session_program), target_program, expiry, and session_signer; returns authority.
+/// - Token present but session_program is None: error (caller must configure a session program).
 fn resolve_player<'a>(
     signer_key: &Pubkey,
     session_token: Option<&UncheckedAccount<'a>>,
+    session_program: Option<&Pubkey>,
 ) -> Result<Pubkey> {
     if let Some(token_account) = session_token {
-        let token = parse_session_token(token_account.as_ref())?;
+        let allowed = session_program.ok_or(error!(GameError::InvalidSession))?;
+        let token = parse_session_token(token_account.as_ref(), allowed)?;
         let clock = Clock::get()?;
         require!(token.session_signer == *signer_key, GameError::InvalidSession);
         require!(token.target_program == crate::ID, GameError::InvalidSession);
@@ -97,6 +97,7 @@ pub mod rps_game {
         let player = resolve_player(
             &ctx.accounts.signer.key(),
             ctx.accounts.session_token.as_ref(),
+            ctx.accounts.game_session.session_program.as_ref(),
         )?;
         let session = &mut ctx.accounts.game_session;
 
@@ -288,7 +289,15 @@ pub mod rps_game {
         ctx: Context<StartGameWithTicket>,
         game_id: u64,
         opponent: Pubkey,
+        session_program: Option<Pubkey>,
     ) -> Result<()> {
+        let real_player = resolve_player(
+            &ctx.accounts.signer.key(),
+            ctx.accounts.session_token.as_ref(),
+            session_program.as_ref(),
+        )?;
+        require!(real_player == ctx.accounts.player.key(), GameError::InvalidPlayer);
+
         // Verify the match ticket shows this player was matched with the opponent
         let ticket_data = ctx.accounts.match_ticket.try_borrow_data()?;
         // Skip 8-byte discriminator, then read: player(32) + tenant(32) + status(1+...)
@@ -306,9 +315,10 @@ pub mod rps_game {
 
         let session = &mut ctx.accounts.game_session;
         session.game_id = game_id;
-        session.player1 = ctx.accounts.player.key();
+        session.player1 = ctx.accounts.player.key(); // real player, not session signer
         session.player2 = opponent;
         session.result = GameResult::None;
+        session.session_program = session_program;
 
         msg!(
             "Game Session Started (verified via ticket): {} vs {}",
@@ -438,14 +448,19 @@ pub struct OnMatchFound<'info> {
 pub struct StartGameWithTicket<'info> {
     #[account(
         init,
-        payer = player,
+        payer = payer,
         space = 8 + GameSession::LEN,
         seeds = [GAME_SESSION_SEED, player.key().as_ref(), opponent.as_ref(), &game_id.to_le_bytes()],
         bump
     )]
     pub game_session: Account<'info, GameSession>,
+    /// CHECK: Real player wallet for PDA seeds — validated by resolve_player in handler
+    pub player: UncheckedAccount<'info>,
+    pub signer: Signer<'info>,
     #[account(mut)]
-    pub player: Signer<'info>,
+    pub payer: Signer<'info>,
+    /// CHECK: Optional Gum session token — owner and fields validated in resolve_player
+    pub session_token: Option<UncheckedAccount<'info>>,
     /// CHECK: MatchTicket PDA from the duel program, verified in instruction body
     pub match_ticket: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
@@ -471,10 +486,13 @@ pub struct GameSession {
     pub player1_choice: Option<Choice>,
     pub player2_choice: Option<Choice>,
     pub result: GameResult,
+    /// Optional session-keys program configured at game start; used by make_choice.
+    pub session_program: Option<Pubkey>,
 }
 
 impl GameSession {
-    pub const LEN: usize = 8 + 32 + 32 + 2 + 2 + 33;
+    // 8 + 32 + 32 + 2 + 2 + 33 + (1+32) = 142
+    pub const LEN: usize = 8 + 32 + 32 + 2 + 2 + 33 + (1 + 32);
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]

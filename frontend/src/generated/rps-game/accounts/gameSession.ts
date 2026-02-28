@@ -13,18 +13,22 @@ export const GAME_SESSION_DISCRIMINATOR = new Uint8Array([150, 116, 20, 197, 205
 
 export function getGameSessionDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(GAME_SESSION_DISCRIMINATOR); }
 
-export type GameSession = { discriminator: ReadonlyUint8Array; gameId: bigint; player1: Address; player2: Address; player1Choice: Option<Choice>; player2Choice: Option<Choice>; result: GameResult;  };
+export type GameSession = { discriminator: ReadonlyUint8Array; gameId: bigint; player1: Address; player2: Address; player1Choice: Option<Choice>; player2Choice: Option<Choice>; result: GameResult; 
+/** Optional session-keys program configured at game start; used by make_choice. */
+sessionProgram: Option<Address>;  };
 
-export type GameSessionArgs = { gameId: number | bigint; player1: Address; player2: Address; player1Choice: OptionOrNullable<ChoiceArgs>; player2Choice: OptionOrNullable<ChoiceArgs>; result: GameResultArgs;  };
+export type GameSessionArgs = { gameId: number | bigint; player1: Address; player2: Address; player1Choice: OptionOrNullable<ChoiceArgs>; player2Choice: OptionOrNullable<ChoiceArgs>; result: GameResultArgs; 
+/** Optional session-keys program configured at game start; used by make_choice. */
+sessionProgram: OptionOrNullable<Address>;  };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
 export function getGameSessionEncoder(): Encoder<GameSessionArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['gameId', getU64Encoder()], ['player1', getAddressEncoder()], ['player2', getAddressEncoder()], ['player1Choice', getOptionEncoder(getChoiceEncoder())], ['player2Choice', getOptionEncoder(getChoiceEncoder())], ['result', getGameResultEncoder()]]), (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['gameId', getU64Encoder()], ['player1', getAddressEncoder()], ['player2', getAddressEncoder()], ['player1Choice', getOptionEncoder(getChoiceEncoder())], ['player2Choice', getOptionEncoder(getChoiceEncoder())], ['result', getGameResultEncoder()], ['sessionProgram', getOptionEncoder(getAddressEncoder())]]), (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }));
 }
 
 /** Gets the decoder for {@link GameSession} account data. */
 export function getGameSessionDecoder(): Decoder<GameSession> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['gameId', getU64Decoder()], ['player1', getAddressDecoder()], ['player2', getAddressDecoder()], ['player1Choice', getOptionDecoder(getChoiceDecoder())], ['player2Choice', getOptionDecoder(getChoiceDecoder())], ['result', getGameResultDecoder()]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['gameId', getU64Decoder()], ['player1', getAddressDecoder()], ['player2', getAddressDecoder()], ['player1Choice', getOptionDecoder(getChoiceDecoder())], ['player2Choice', getOptionDecoder(getChoiceDecoder())], ['result', getGameResultDecoder()], ['sessionProgram', getOptionDecoder(getAddressDecoder())]]);
 }
 
 /** Gets the codec for {@link GameSession} account data. */

@@ -6,7 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
+import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount } from '@solana/kit';
 import { getAccountMetaFactory, getAddressFromResolvedInstructionAccount, type ResolvedInstructionAccount } from '@solana/program-client-core';
 import { DUEL_PROGRAM_ADDRESS } from '../programs';
 
@@ -14,8 +14,8 @@ export const CLOSE_TICKET_DISCRIMINATOR = new Uint8Array([66, 209, 114, 197, 75,
 
 export function getCloseTicketDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(CLOSE_TICKET_DISCRIMINATOR); }
 
-export type CloseTicketInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTicket extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTicket extends string ? WritableAccount<TAccountTicket> : TAccountTicket, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayer extends string ? WritableSignerAccount<TAccountPlayer> & AccountSignerMeta<TAccountPlayer> : TAccountPlayer, ...TRemainingAccounts]>;
+export type CloseTicketInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTicket extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TAccountSessionToken extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTicket extends string ? WritableAccount<TAccountTicket> : TAccountTicket, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayer extends string ? WritableAccount<TAccountPlayer> : TAccountPlayer, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, TAccountSessionToken extends string ? ReadonlyAccount<TAccountSessionToken> : TAccountSessionToken, ...TRemainingAccounts]>;
 
 export type CloseTicketInstructionData = { discriminator: ReadonlyUint8Array;  };
 
@@ -33,18 +33,20 @@ export function getCloseTicketInstructionDataCodec(): FixedSizeCodec<CloseTicket
     return combineCodec(getCloseTicketInstructionDataEncoder(), getCloseTicketInstructionDataDecoder());
 }
 
-export type CloseTicketAsyncInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string> =  {
+export type CloseTicketAsyncInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   ticket?: Address<TAccountTicket>;
 tenant: Address<TAccountTenant>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 }
 
-export async function getCloseTicketInstructionAsync<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CloseTicketAsyncInput<TAccountTicket, TAccountTenant, TAccountPlayer>, config?: { programAddress?: TProgramAddress } ): Promise<CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer>> {
+export async function getCloseTicketInstructionAsync<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CloseTicketAsyncInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): Promise<CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: true } }
+const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
@@ -54,28 +56,30 @@ accounts.ticket.value = await getProgramDerivedAddress({ programAddress, seeds: 
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player)], data: getCloseTicketInstructionDataEncoder().encode({}), programAddress } as CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer>);
+return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getCloseTicketInstructionDataEncoder().encode({}), programAddress } as CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>);
 }
 
-export type CloseTicketInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string> =  {
+export type CloseTicketInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   ticket: Address<TAccountTicket>;
 tenant: Address<TAccountTenant>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 }
 
-export function getCloseTicketInstruction<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CloseTicketInput<TAccountTicket, TAccountTenant, TAccountPlayer>, config?: { programAddress?: TProgramAddress } ): CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer> {
+export function getCloseTicketInstruction<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: CloseTicketInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: true } }
+const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
 
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player)], data: getCloseTicketInstructionDataEncoder().encode({}), programAddress } as CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer>);
+return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getCloseTicketInstructionDataEncoder().encode({}), programAddress } as CloseTicketInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountSessionToken>);
 }
 
 export type ParsedCloseTicketInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -83,12 +87,14 @@ accounts: {
 ticket: TAccountMetas[0];
 tenant: TAccountMetas[1];
 player: TAccountMetas[2];
+signer: TAccountMetas[3];
+sessionToken?: TAccountMetas[4] | undefined;
 };
 data: CloseTicketInstructionData; };
 
 export function parseCloseTicketInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedCloseTicketInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
-  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 3 });
+  if (instruction.accounts.length < 5) {
+  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 5 });
 }
 let accountIndex = 0;
 const getNextAccount = () => {
@@ -96,5 +102,9 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { ticket: getNextAccount(), tenant: getNextAccount(), player: getNextAccount() }, data: getCloseTicketInstructionDataDecoder().decode(instruction.data) };
+const getNextOptionalAccount = () => {
+  const accountMeta = getNextAccount();
+  return accountMeta.address === DUEL_PROGRAM_ADDRESS ? undefined : accountMeta;
+};
+  return { programAddress: instruction.programAddress, accounts: { ticket: getNextAccount(), tenant: getNextAccount(), player: getNextAccount(), signer: getNextAccount(), sessionToken: getNextOptionalAccount() }, data: getCloseTicketInstructionDataDecoder().decode(instruction.data) };
 }

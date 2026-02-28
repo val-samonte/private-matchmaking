@@ -14,8 +14,8 @@ export const JOIN_QUEUE_DISCRIMINATOR = new Uint8Array([157, 115, 48, 109, 65, 8
 
 export function getJoinQueueDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(JOIN_QUEUE_DISCRIMINATOR); }
 
-export type JoinQueueInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountQueue extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayerData extends string | AccountMeta<string> = string, TAccountPlayerTicket extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountQueue extends string ? WritableAccount<TAccountQueue> : TAccountQueue, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayerData extends string ? ReadonlyAccount<TAccountPlayerData> : TAccountPlayerData, TAccountPlayerTicket extends string ? WritableAccount<TAccountPlayerTicket> : TAccountPlayerTicket, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, ...TRemainingAccounts]>;
+export type JoinQueueInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountQueue extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayerData extends string | AccountMeta<string> = string, TAccountPlayerTicket extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TAccountSessionToken extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountQueue extends string ? WritableAccount<TAccountQueue> : TAccountQueue, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayerData extends string ? ReadonlyAccount<TAccountPlayerData> : TAccountPlayerData, TAccountPlayerTicket extends string ? WritableAccount<TAccountPlayerTicket> : TAccountPlayerTicket, TAccountPlayer extends string ? ReadonlyAccount<TAccountPlayer> : TAccountPlayer, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, TAccountSessionToken extends string ? ReadonlyAccount<TAccountSessionToken> : TAccountSessionToken, ...TRemainingAccounts]>;
 
 export type JoinQueueInstructionData = { discriminator: ReadonlyUint8Array;  };
 
@@ -33,53 +33,57 @@ export function getJoinQueueInstructionDataCodec(): FixedSizeCodec<JoinQueueInst
     return combineCodec(getJoinQueueInstructionDataEncoder(), getJoinQueueInstructionDataDecoder());
 }
 
-export type JoinQueueAsyncInput<TAccountQueue extends string = string, TAccountTenant extends string = string, TAccountPlayerData extends string = string, TAccountPlayerTicket extends string = string, TAccountSigner extends string = string> =  {
+export type JoinQueueAsyncInput<TAccountQueue extends string = string, TAccountTenant extends string = string, TAccountPlayerData extends string = string, TAccountPlayerTicket extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   queue: Address<TAccountQueue>;
 tenant: Address<TAccountTenant>;
 playerData: Address<TAccountPlayerData>;
 playerTicket?: Address<TAccountPlayerTicket>;
+player: Address<TAccountPlayer>;
 signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 }
 
-export async function getJoinQueueInstructionAsync<TAccountQueue extends string, TAccountTenant extends string, TAccountPlayerData extends string, TAccountPlayerTicket extends string, TAccountSigner extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: JoinQueueAsyncInput<TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountSigner>, config?: { programAddress?: TProgramAddress } ): Promise<JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountSigner>> {
+export async function getJoinQueueInstructionAsync<TAccountQueue extends string, TAccountTenant extends string, TAccountPlayerData extends string, TAccountPlayerTicket extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: JoinQueueAsyncInput<TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountPlayer, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): Promise<JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountPlayer, TAccountSigner, TAccountSessionToken>> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: false }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false } }
+const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: false }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
 // Resolve default values.
 if (!accounts.playerTicket.value) {
-accounts.playerTicket.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([116, 105, 99, 107, 101, 116])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("signer", accounts.signer.value)), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("tenant", accounts.tenant.value))] });
+accounts.playerTicket.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([116, 105, 99, 107, 101, 116])), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("player", accounts.player.value)), getAddressEncoder().encode(getAddressFromResolvedInstructionAccount("tenant", accounts.tenant.value))] });
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("queue", accounts.queue), getAccountMeta("tenant", accounts.tenant), getAccountMeta("playerData", accounts.playerData), getAccountMeta("playerTicket", accounts.playerTicket), getAccountMeta("signer", accounts.signer)], data: getJoinQueueInstructionDataEncoder().encode({}), programAddress } as JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountSigner>);
+return Object.freeze({ accounts: [getAccountMeta("queue", accounts.queue), getAccountMeta("tenant", accounts.tenant), getAccountMeta("playerData", accounts.playerData), getAccountMeta("playerTicket", accounts.playerTicket), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getJoinQueueInstructionDataEncoder().encode({}), programAddress } as JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountPlayer, TAccountSigner, TAccountSessionToken>);
 }
 
-export type JoinQueueInput<TAccountQueue extends string = string, TAccountTenant extends string = string, TAccountPlayerData extends string = string, TAccountPlayerTicket extends string = string, TAccountSigner extends string = string> =  {
+export type JoinQueueInput<TAccountQueue extends string = string, TAccountTenant extends string = string, TAccountPlayerData extends string = string, TAccountPlayerTicket extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountSessionToken extends string = string> =  {
   queue: Address<TAccountQueue>;
 tenant: Address<TAccountTenant>;
 playerData: Address<TAccountPlayerData>;
 playerTicket: Address<TAccountPlayerTicket>;
+player: Address<TAccountPlayer>;
 signer: TransactionSigner<TAccountSigner>;
+sessionToken?: Address<TAccountSessionToken>;
 }
 
-export function getJoinQueueInstruction<TAccountQueue extends string, TAccountTenant extends string, TAccountPlayerData extends string, TAccountPlayerTicket extends string, TAccountSigner extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: JoinQueueInput<TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountSigner>, config?: { programAddress?: TProgramAddress } ): JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountSigner> {
+export function getJoinQueueInstruction<TAccountQueue extends string, TAccountTenant extends string, TAccountPlayerData extends string, TAccountPlayerTicket extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountSessionToken extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: JoinQueueInput<TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountPlayer, TAccountSigner, TAccountSessionToken>, config?: { programAddress?: TProgramAddress } ): JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountPlayer, TAccountSigner, TAccountSessionToken> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: false }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, signer: { value: input.signer ?? null, isWritable: false } }
+const originalAccounts = { queue: { value: input.queue ?? null, isWritable: true }, tenant: { value: input.tenant ?? null, isWritable: false }, playerData: { value: input.playerData ?? null, isWritable: false }, playerTicket: { value: input.playerTicket ?? null, isWritable: true }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, sessionToken: { value: input.sessionToken ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
 
 
 
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("queue", accounts.queue), getAccountMeta("tenant", accounts.tenant), getAccountMeta("playerData", accounts.playerData), getAccountMeta("playerTicket", accounts.playerTicket), getAccountMeta("signer", accounts.signer)], data: getJoinQueueInstructionDataEncoder().encode({}), programAddress } as JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountSigner>);
+return Object.freeze({ accounts: [getAccountMeta("queue", accounts.queue), getAccountMeta("tenant", accounts.tenant), getAccountMeta("playerData", accounts.playerData), getAccountMeta("playerTicket", accounts.playerTicket), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("sessionToken", accounts.sessionToken)], data: getJoinQueueInstructionDataEncoder().encode({}), programAddress } as JoinQueueInstruction<TProgramAddress, TAccountQueue, TAccountTenant, TAccountPlayerData, TAccountPlayerTicket, TAccountPlayer, TAccountSigner, TAccountSessionToken>);
 }
 
 export type ParsedJoinQueueInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -88,13 +92,15 @@ queue: TAccountMetas[0];
 tenant: TAccountMetas[1];
 playerData: TAccountMetas[2];
 playerTicket: TAccountMetas[3];
-signer: TAccountMetas[4];
+player: TAccountMetas[4];
+signer: TAccountMetas[5];
+sessionToken?: TAccountMetas[6] | undefined;
 };
 data: JoinQueueInstructionData; };
 
 export function parseJoinQueueInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedJoinQueueInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 5) {
-  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 5 });
+  if (instruction.accounts.length < 7) {
+  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 7 });
 }
 let accountIndex = 0;
 const getNextAccount = () => {
@@ -102,5 +108,9 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { queue: getNextAccount(), tenant: getNextAccount(), playerData: getNextAccount(), playerTicket: getNextAccount(), signer: getNextAccount() }, data: getJoinQueueInstructionDataDecoder().decode(instruction.data) };
+const getNextOptionalAccount = () => {
+  const accountMeta = getNextAccount();
+  return accountMeta.address === DUEL_PROGRAM_ADDRESS ? undefined : accountMeta;
+};
+  return { programAddress: instruction.programAddress, accounts: { queue: getNextAccount(), tenant: getNextAccount(), playerData: getNextAccount(), playerTicket: getNextAccount(), player: getNextAccount(), signer: getNextAccount(), sessionToken: getNextOptionalAccount() }, data: getJoinQueueInstructionDataDecoder().decode(instruction.data) };
 }

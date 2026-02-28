@@ -6,7 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
+import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getOptionDecoder, getOptionEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, SolanaError, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type Codec, type Decoder, type Encoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type Option, type OptionOrNullable, type ReadonlyAccount, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
 import { getAccountMetaFactory, getAddressFromResolvedInstructionAccount, type ResolvedInstructionAccount } from '@solana/program-client-core';
 import { DUEL_PROGRAM_ADDRESS } from '../programs';
 
@@ -14,41 +14,49 @@ export const SETUP_TICKET_PERMISSION_DISCRIMINATOR = new Uint8Array([164, 29, 7,
 
 export function getSetupTicketPermissionDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(SETUP_TICKET_PERMISSION_DISCRIMINATOR); }
 
-export type SetupTicketPermissionInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTicket extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountPermission extends string | AccountMeta<string> = string, TAccountPermissionProgram extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTicket extends string ? ReadonlyAccount<TAccountTicket> : TAccountTicket, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayer extends string ? WritableSignerAccount<TAccountPlayer> & AccountSignerMeta<TAccountPlayer> : TAccountPlayer, TAccountPermission extends string ? WritableAccount<TAccountPermission> : TAccountPermission, TAccountPermissionProgram extends string ? ReadonlyAccount<TAccountPermissionProgram> : TAccountPermissionProgram, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
+export type SetupTicketPermissionInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountTicket extends string | AccountMeta<string> = string, TAccountTenant extends string | AccountMeta<string> = string, TAccountPlayer extends string | AccountMeta<string> = string, TAccountSigner extends string | AccountMeta<string> = string, TAccountPayer extends string | AccountMeta<string> = string, TAccountSessionToken extends string | AccountMeta<string> = string, TAccountPermission extends string | AccountMeta<string> = string, TAccountPermissionProgram extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountTicket extends string ? ReadonlyAccount<TAccountTicket> : TAccountTicket, TAccountTenant extends string ? ReadonlyAccount<TAccountTenant> : TAccountTenant, TAccountPlayer extends string ? ReadonlyAccount<TAccountPlayer> : TAccountPlayer, TAccountSigner extends string ? ReadonlySignerAccount<TAccountSigner> & AccountSignerMeta<TAccountSigner> : TAccountSigner, TAccountPayer extends string ? WritableSignerAccount<TAccountPayer> & AccountSignerMeta<TAccountPayer> : TAccountPayer, TAccountSessionToken extends string ? ReadonlyAccount<TAccountSessionToken> : TAccountSessionToken, TAccountPermission extends string ? WritableAccount<TAccountPermission> : TAccountPermission, TAccountPermissionProgram extends string ? ReadonlyAccount<TAccountPermissionProgram> : TAccountPermissionProgram, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
-export type SetupTicketPermissionInstructionData = { discriminator: ReadonlyUint8Array;  };
+export type SetupTicketPermissionInstructionData = { discriminator: ReadonlyUint8Array; sessionKey: Option<Address>;  };
 
-export type SetupTicketPermissionInstructionDataArgs = {  };
+export type SetupTicketPermissionInstructionDataArgs = { sessionKey: OptionOrNullable<Address>;  };
 
-export function getSetupTicketPermissionInstructionDataEncoder(): FixedSizeEncoder<SetupTicketPermissionInstructionDataArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)]]), (value) => ({ ...value, discriminator: SETUP_TICKET_PERMISSION_DISCRIMINATOR }));
+export function getSetupTicketPermissionInstructionDataEncoder(): Encoder<SetupTicketPermissionInstructionDataArgs> {
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['sessionKey', getOptionEncoder(getAddressEncoder())]]), (value) => ({ ...value, discriminator: SETUP_TICKET_PERMISSION_DISCRIMINATOR }));
 }
 
-export function getSetupTicketPermissionInstructionDataDecoder(): FixedSizeDecoder<SetupTicketPermissionInstructionData> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)]]);
+export function getSetupTicketPermissionInstructionDataDecoder(): Decoder<SetupTicketPermissionInstructionData> {
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['sessionKey', getOptionDecoder(getAddressDecoder())]]);
 }
 
-export function getSetupTicketPermissionInstructionDataCodec(): FixedSizeCodec<SetupTicketPermissionInstructionDataArgs, SetupTicketPermissionInstructionData> {
+export function getSetupTicketPermissionInstructionDataCodec(): Codec<SetupTicketPermissionInstructionDataArgs, SetupTicketPermissionInstructionData> {
     return combineCodec(getSetupTicketPermissionInstructionDataEncoder(), getSetupTicketPermissionInstructionDataDecoder());
 }
 
-export type SetupTicketPermissionAsyncInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountPermission extends string = string, TAccountPermissionProgram extends string = string, TAccountSystemProgram extends string = string> =  {
+export type SetupTicketPermissionAsyncInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountPayer extends string = string, TAccountSessionToken extends string = string, TAccountPermission extends string = string, TAccountPermissionProgram extends string = string, TAccountSystemProgram extends string = string> =  {
   ticket?: Address<TAccountTicket>;
 tenant: Address<TAccountTenant>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+payer: TransactionSigner<TAccountPayer>;
+sessionToken?: Address<TAccountSessionToken>;
 permission: Address<TAccountPermission>;
 permissionProgram: Address<TAccountPermissionProgram>;
 systemProgram?: Address<TAccountSystemProgram>;
+sessionKey: SetupTicketPermissionInstructionDataArgs["sessionKey"];
 }
 
-export async function getSetupTicketPermissionInstructionAsync<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountPermission extends string, TAccountPermissionProgram extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: SetupTicketPermissionAsyncInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>> {
+export async function getSetupTicketPermissionInstructionAsync<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountPayer extends string, TAccountSessionToken extends string, TAccountPermission extends string, TAccountPermissionProgram extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: SetupTicketPermissionAsyncInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: false }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: true }, permission: { value: input.permission ?? null, isWritable: true }, permissionProgram: { value: input.permissionProgram ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
+const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: false }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, payer: { value: input.payer ?? null, isWritable: true }, sessionToken: { value: input.sessionToken ?? null, isWritable: false }, permission: { value: input.permission ?? null, isWritable: true }, permissionProgram: { value: input.permissionProgram ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
+
+
+// Original args.
+const args = { ...input,  };
 
 
 // Resolve default values.
@@ -60,25 +68,33 @@ accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("permission", accounts.permission), getAccountMeta("permissionProgram", accounts.permissionProgram), getAccountMeta("systemProgram", accounts.systemProgram)], data: getSetupTicketPermissionInstructionDataEncoder().encode({}), programAddress } as SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>);
+return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("payer", accounts.payer), getAccountMeta("sessionToken", accounts.sessionToken), getAccountMeta("permission", accounts.permission), getAccountMeta("permissionProgram", accounts.permissionProgram), getAccountMeta("systemProgram", accounts.systemProgram)], data: getSetupTicketPermissionInstructionDataEncoder().encode(args as SetupTicketPermissionInstructionDataArgs), programAddress } as SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>);
 }
 
-export type SetupTicketPermissionInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountPermission extends string = string, TAccountPermissionProgram extends string = string, TAccountSystemProgram extends string = string> =  {
+export type SetupTicketPermissionInput<TAccountTicket extends string = string, TAccountTenant extends string = string, TAccountPlayer extends string = string, TAccountSigner extends string = string, TAccountPayer extends string = string, TAccountSessionToken extends string = string, TAccountPermission extends string = string, TAccountPermissionProgram extends string = string, TAccountSystemProgram extends string = string> =  {
   ticket: Address<TAccountTicket>;
 tenant: Address<TAccountTenant>;
-player: TransactionSigner<TAccountPlayer>;
+player: Address<TAccountPlayer>;
+signer: TransactionSigner<TAccountSigner>;
+payer: TransactionSigner<TAccountPayer>;
+sessionToken?: Address<TAccountSessionToken>;
 permission: Address<TAccountPermission>;
 permissionProgram: Address<TAccountPermissionProgram>;
 systemProgram?: Address<TAccountSystemProgram>;
+sessionKey: SetupTicketPermissionInstructionDataArgs["sessionKey"];
 }
 
-export function getSetupTicketPermissionInstruction<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountPermission extends string, TAccountPermissionProgram extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: SetupTicketPermissionInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram> {
+export function getSetupTicketPermissionInstruction<TAccountTicket extends string, TAccountTenant extends string, TAccountPlayer extends string, TAccountSigner extends string, TAccountPayer extends string, TAccountSessionToken extends string, TAccountPermission extends string, TAccountPermissionProgram extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof DUEL_PROGRAM_ADDRESS>(input: SetupTicketPermissionInput<TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram> {
   // Program address.
 const programAddress = config?.programAddress ?? DUEL_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: false }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: true }, permission: { value: input.permission ?? null, isWritable: true }, permissionProgram: { value: input.permissionProgram ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
+const originalAccounts = { ticket: { value: input.ticket ?? null, isWritable: false }, tenant: { value: input.tenant ?? null, isWritable: false }, player: { value: input.player ?? null, isWritable: false }, signer: { value: input.signer ?? null, isWritable: false }, payer: { value: input.payer ?? null, isWritable: true }, sessionToken: { value: input.sessionToken ?? null, isWritable: false }, permission: { value: input.permission ?? null, isWritable: true }, permissionProgram: { value: input.permissionProgram ?? null, isWritable: false }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedInstructionAccount>;
+
+
+// Original args.
+const args = { ...input,  };
 
 
 // Resolve default values.
@@ -87,7 +103,7 @@ accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("permission", accounts.permission), getAccountMeta("permissionProgram", accounts.permissionProgram), getAccountMeta("systemProgram", accounts.systemProgram)], data: getSetupTicketPermissionInstructionDataEncoder().encode({}), programAddress } as SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>);
+return Object.freeze({ accounts: [getAccountMeta("ticket", accounts.ticket), getAccountMeta("tenant", accounts.tenant), getAccountMeta("player", accounts.player), getAccountMeta("signer", accounts.signer), getAccountMeta("payer", accounts.payer), getAccountMeta("sessionToken", accounts.sessionToken), getAccountMeta("permission", accounts.permission), getAccountMeta("permissionProgram", accounts.permissionProgram), getAccountMeta("systemProgram", accounts.systemProgram)], data: getSetupTicketPermissionInstructionDataEncoder().encode(args as SetupTicketPermissionInstructionDataArgs), programAddress } as SetupTicketPermissionInstruction<TProgramAddress, TAccountTicket, TAccountTenant, TAccountPlayer, TAccountSigner, TAccountPayer, TAccountSessionToken, TAccountPermission, TAccountPermissionProgram, TAccountSystemProgram>);
 }
 
 export type ParsedSetupTicketPermissionInstruction<TProgram extends string = typeof DUEL_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -95,15 +111,18 @@ accounts: {
 ticket: TAccountMetas[0];
 tenant: TAccountMetas[1];
 player: TAccountMetas[2];
-permission: TAccountMetas[3];
-permissionProgram: TAccountMetas[4];
-systemProgram: TAccountMetas[5];
+signer: TAccountMetas[3];
+payer: TAccountMetas[4];
+sessionToken?: TAccountMetas[5] | undefined;
+permission: TAccountMetas[6];
+permissionProgram: TAccountMetas[7];
+systemProgram: TAccountMetas[8];
 };
 data: SetupTicketPermissionInstructionData; };
 
 export function parseSetupTicketPermissionInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedSetupTicketPermissionInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 6) {
-  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 6 });
+  if (instruction.accounts.length < 9) {
+  throw new SolanaError(SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS, { actualAccountMetas: instruction.accounts.length, expectedAccountMetas: 9 });
 }
 let accountIndex = 0;
 const getNextAccount = () => {
@@ -111,5 +130,9 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { ticket: getNextAccount(), tenant: getNextAccount(), player: getNextAccount(), permission: getNextAccount(), permissionProgram: getNextAccount(), systemProgram: getNextAccount() }, data: getSetupTicketPermissionInstructionDataDecoder().decode(instruction.data) };
+const getNextOptionalAccount = () => {
+  const accountMeta = getNextAccount();
+  return accountMeta.address === DUEL_PROGRAM_ADDRESS ? undefined : accountMeta;
+};
+  return { programAddress: instruction.programAddress, accounts: { ticket: getNextAccount(), tenant: getNextAccount(), player: getNextAccount(), signer: getNextAccount(), payer: getNextAccount(), sessionToken: getNextOptionalAccount(), permission: getNextAccount(), permissionProgram: getNextAccount(), systemProgram: getNextAccount() }, data: getSetupTicketPermissionInstructionDataDecoder().decode(instruction.data) };
 }

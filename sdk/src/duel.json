@@ -53,8 +53,15 @@
           "name": "tenant"
         },
         {
-          "name": "player",
+          "name": "player"
+        },
+        {
+          "name": "signer",
           "signer": true
+        },
+        {
+          "name": "session_token",
+          "optional": true
         }
       ],
       "args": []
@@ -107,8 +114,15 @@
         },
         {
           "name": "player",
-          "writable": true,
+          "writable": true
+        },
+        {
+          "name": "signer",
           "signer": true
+        },
+        {
+          "name": "session_token",
+          "optional": true
         }
       ],
       "args": []
@@ -196,9 +210,20 @@
           "name": "tenant"
         },
         {
-          "name": "player",
+          "name": "player"
+        },
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "payer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "session_token",
+          "optional": true
         },
         {
           "name": "system_program",
@@ -732,6 +757,12 @@
               ]
             }
           }
+        },
+        {
+          "name": "session_program",
+          "type": {
+            "option": "pubkey"
+          }
         }
       ]
     },
@@ -779,7 +810,7 @@
               },
               {
                 "kind": "account",
-                "path": "signer"
+                "path": "player"
               },
               {
                 "kind": "account",
@@ -789,8 +820,15 @@
           }
         },
         {
+          "name": "player"
+        },
+        {
           "name": "signer",
           "signer": true
+        },
+        {
+          "name": "session_token",
+          "optional": true
         }
       ],
       "args": []
@@ -892,8 +930,8 @@
     {
       "name": "setup_ticket_permission",
       "docs": [
-        "Set up permission for ticket PDA so queueAuthority can write it on TEE.",
-        "Must be called BEFORE delegate_ticket while the program still owns the PDA."
+        "Set up permission for ticket PDA so queueAuthority (and optionally a session key) can",
+        "read/write it on TEE.  Must be called BEFORE delegate_ticket while the program still owns the PDA."
       ],
       "discriminator": [
         164,
@@ -936,9 +974,20 @@
           "name": "tenant"
         },
         {
-          "name": "player",
+          "name": "player"
+        },
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "payer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "session_token",
+          "optional": true
         },
         {
           "name": "permission",
@@ -952,7 +1001,14 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "session_key",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1041,6 +1097,16 @@
       "code": 6005,
       "name": "InvalidTicketAccount",
       "msg": "Invalid ticket account"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidSession",
+      "msg": "Invalid session token"
+    },
+    {
+      "code": 6007,
+      "name": "SessionExpired",
+      "msg": "Session token expired"
     }
   ],
   "types": [
@@ -1284,6 +1350,16 @@
                   8
                 ]
               }
+            }
+          },
+          {
+            "name": "session_program",
+            "docs": [
+              "Optional session-keys program that may issue session tokens for this Tenant.",
+              "If None, session tokens are rejected; direct wallet signing is always accepted."
+            ],
+            "type": {
+              "option": "pubkey"
             }
           }
         ]

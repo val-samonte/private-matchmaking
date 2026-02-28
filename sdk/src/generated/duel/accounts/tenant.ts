@@ -12,18 +12,28 @@ export const TENANT_DISCRIMINATOR = new Uint8Array([61, 43, 215, 51, 232, 242, 2
 
 export function getTenantDiscriminatorBytes() { return fixEncoderSize(getBytesEncoder(), 8).encode(TENANT_DISCRIMINATOR); }
 
-export type Tenant = { discriminator: ReadonlyUint8Array; authority: Address; tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: bigint; callbackProgramId: Option<Address>; callbackDiscriminator: Option<ReadonlyUint8Array>;  };
+export type Tenant = { discriminator: ReadonlyUint8Array; authority: Address; tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: bigint; callbackProgramId: Option<Address>; callbackDiscriminator: Option<ReadonlyUint8Array>; 
+/**
+ * Optional session-keys program that may issue session tokens for this Tenant.
+ * If None, session tokens are rejected; direct wallet signing is always accepted.
+ */
+sessionProgram: Option<Address>;  };
 
-export type TenantArgs = { authority: Address; tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: number | bigint; callbackProgramId: OptionOrNullable<Address>; callbackDiscriminator: OptionOrNullable<ReadonlyUint8Array>;  };
+export type TenantArgs = { authority: Address; tenantProgramId: Address; eloOffset: number; eloSize: number; eloWindow: number | bigint; callbackProgramId: OptionOrNullable<Address>; callbackDiscriminator: OptionOrNullable<ReadonlyUint8Array>; 
+/**
+ * Optional session-keys program that may issue session tokens for this Tenant.
+ * If None, session tokens are rejected; direct wallet signing is always accepted.
+ */
+sessionProgram: OptionOrNullable<Address>;  };
 
 /** Gets the encoder for {@link TenantArgs} account data. */
 export function getTenantEncoder(): Encoder<TenantArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['authority', getAddressEncoder()], ['tenantProgramId', getAddressEncoder()], ['eloOffset', getU32Encoder()], ['eloSize', getU8Encoder()], ['eloWindow', getU64Encoder()], ['callbackProgramId', getOptionEncoder(getAddressEncoder())], ['callbackDiscriminator', getOptionEncoder(fixEncoderSize(getBytesEncoder(), 8))]]), (value) => ({ ...value, discriminator: TENANT_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['authority', getAddressEncoder()], ['tenantProgramId', getAddressEncoder()], ['eloOffset', getU32Encoder()], ['eloSize', getU8Encoder()], ['eloWindow', getU64Encoder()], ['callbackProgramId', getOptionEncoder(getAddressEncoder())], ['callbackDiscriminator', getOptionEncoder(fixEncoderSize(getBytesEncoder(), 8))], ['sessionProgram', getOptionEncoder(getAddressEncoder())]]), (value) => ({ ...value, discriminator: TENANT_DISCRIMINATOR }));
 }
 
 /** Gets the decoder for {@link Tenant} account data. */
 export function getTenantDecoder(): Decoder<Tenant> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['authority', getAddressDecoder()], ['tenantProgramId', getAddressDecoder()], ['eloOffset', getU32Decoder()], ['eloSize', getU8Decoder()], ['eloWindow', getU64Decoder()], ['callbackProgramId', getOptionDecoder(getAddressDecoder())], ['callbackDiscriminator', getOptionDecoder(fixDecoderSize(getBytesDecoder(), 8))]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['authority', getAddressDecoder()], ['tenantProgramId', getAddressDecoder()], ['eloOffset', getU32Decoder()], ['eloSize', getU8Decoder()], ['eloWindow', getU64Decoder()], ['callbackProgramId', getOptionDecoder(getAddressDecoder())], ['callbackDiscriminator', getOptionDecoder(fixDecoderSize(getBytesDecoder(), 8))], ['sessionProgram', getOptionDecoder(getAddressDecoder())]]);
 }
 
 /** Gets the codec for {@link Tenant} account data. */
